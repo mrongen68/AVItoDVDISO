@@ -52,7 +52,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            System.Windows.MessageBox.Show(this, ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -60,3 +60,4 @@ public partial class MainWindow : Window
     private void OpenOutput_Click(object sender, RoutedEventArgs e) => _vm.OpenOutputFolder();
 
 }
+
