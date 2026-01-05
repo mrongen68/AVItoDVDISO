@@ -1,6 +1,3 @@
-# ---------------------------------
-# File: src\AVItoDVDISO.Tools\Tooling\DvdauthorService.cs
-# ---------------------------------
 using System.Text;
 using AVItoDVDISO.Core.Models;
 using AVItoDVDISO.Core.Services;
@@ -80,4 +77,5 @@ public sealed class DvdauthorService
 
     private static string EscapeXml(string s)
         => s.Replace("&", "&amp;").Replace("\"", "&quot;").Replace("<", "&lt;").Replace(">", "&gt;");
+
 }
