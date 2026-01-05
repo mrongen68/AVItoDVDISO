@@ -1,6 +1,3 @@
-# ---------------------------------
-# File: src\AVItoDVDISO.Core\Models\Enums.cs
-# ---------------------------------
 namespace AVItoDVDISO.Core.Models;
 
 public enum DvdMode
@@ -27,4 +24,5 @@ public enum EncodeMode
     Fit,
     Best,
     Fast
+
 }
