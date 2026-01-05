@@ -41,10 +41,35 @@ jobs:
       - name: publish
         run: dotnet publish src/AVItoDVDISO.App/AVItoDVDISO.App.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true -o artifacts/publish
 
-      - name: bundle
+      - name: prepare portable folder
         shell: pwsh
         run: |
-          ./build/bundle.ps1 -Configuration Release -PublishDir artifacts/publish -OutDir artifacts/bundle
+          New-Item -ItemType Directory -Force -Path artifacts/portable | Out-Null
+          Copy-Item -Recurse -Force artifacts/publish/* artifacts/portable/
+
+          New-Item -ItemType Directory -Force -Path artifacts/portable/tools | Out-Null
+          Copy-Item -Force artifacts/tools/* artifacts/portable/tools/
+
+          if (Test-Path "licenses") {
+            Copy-Item -Recurse -Force licenses artifacts/portable/licenses
+          }
+
+          if (Test-Path "README.txt") {
+            Copy-Item -Force README.txt artifacts/portable/README.txt
+          }
+
+          if (Test-Path "LICENSE.txt") {
+            Copy-Item -Force LICENSE.txt artifacts/portable/LICENSE.txt
+          }
+
+          Rename-Item -Force artifacts/portable/AVItoDVDISO.App.exe AVItoDVDISO.exe
+
+      - name: create zip
+        shell: pwsh
+        run: |
+          if (Test-Path artifacts/AVItoDVDISO_Release.zip) { Remove-Item artifacts/AVItoDVDISO_Release.zip -Force }
+          Compress-Archive -Path artifacts/portable/* -DestinationPath artifacts/AVItoDVDISO_Release.zip
+
           
       - name: list artifacts folder
         shell: pwsh
