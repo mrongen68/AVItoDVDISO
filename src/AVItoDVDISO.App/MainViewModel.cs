@@ -6,6 +6,8 @@ using System.Text;
 using AVItoDVDISO.Core.Models;
 using AVItoDVDISO.Core.Services;
 using AVItoDVDISO.Tools.Pipeline;
+using System.IO;
+using System.Linq;
 
 namespace AVItoDVDISO.App;
 
@@ -263,3 +265,4 @@ public sealed class MainViewModel : INotifyPropertyChanged
         return clean;
     }
 }
+
