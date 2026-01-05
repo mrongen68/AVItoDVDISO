@@ -1,6 +1,3 @@
-# ---------------------------------
-# File: src\AVItoDVDISO.Tools\Pipeline\ConvertPipeline.cs
-# ---------------------------------
 using AVItoDVDISO.Core.Models;
 using AVItoDVDISO.Core.Services;
 using AVItoDVDISO.Tools.Process;
@@ -109,4 +106,5 @@ public sealed class ConvertPipeline
             onProgress(new ConvertProgress { Stage = "Iso", Percent = 100, Message = "ISO ready" });
         }
     }
+
 }
