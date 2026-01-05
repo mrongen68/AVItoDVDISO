@@ -1,6 +1,3 @@
-# ---------------------------------
-# File: build\bundle.ps1
-# ---------------------------------
 param(
   [Parameter(Mandatory=$true)][string]$Configuration,
   [Parameter(Mandatory=$true)][string]$PublishDir,
@@ -51,5 +48,6 @@ New-Item -ItemType Directory -Force -Path $zipDir | Out-Null
 if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [System.IO.Compression.ZipFile]::CreateFromDirectory($OutDir, $zipPath)
+
 
 Write-Host "Bundled to: $zipPath"
