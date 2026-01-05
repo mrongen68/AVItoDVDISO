@@ -14,6 +14,8 @@ function Ensure-File([string]$path) {
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $toolsSrc = Join-Path $repoRoot "tools"
+$toolsDownloaded = Join-Path $repoRoot "artifacts\tools"
+if (Test-Path $toolsDownloaded) { $toolsSrc = $toolsDownloaded }
 $presetsSrc = Join-Path $repoRoot "presets"
 $licensesSrc = Join-Path $repoRoot "licenses"
 $readmeSrc = Join-Path $repoRoot "README.txt"
@@ -51,3 +53,4 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 
 Write-Host "Bundled to: $zipPath"
+
