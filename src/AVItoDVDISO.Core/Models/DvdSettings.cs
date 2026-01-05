@@ -1,6 +1,3 @@
-# ---------------------------------
-# File: src\AVItoDVDISO.Core\Models\DvdSettings.cs
-# ---------------------------------
 namespace AVItoDVDISO.Core.Models;
 
 public sealed class DvdSettings
@@ -10,4 +7,5 @@ public sealed class DvdSettings
     public ChapterMode ChaptersMode { get; set; } = ChapterMode.Off;
     public int ChaptersEveryMinutes { get; set; } = 5;
     public string PresetId { get; set; } = "fit";
+
 }
