@@ -1,6 +1,3 @@
-# ---------------------------------
-# File: src\AVItoDVDISO.Core\Models\PresetModels.cs
-# ---------------------------------
 namespace AVItoDVDISO.Core.Models;
 
 public sealed class PresetsRoot
@@ -51,4 +48,5 @@ public sealed class VideoPreset
     public int BufSizeKbps { get; set; } = 1835;
     public int MinRateKbps { get; set; } = 2000;
     public bool TwoPass { get; set; } = false;
+
 }
