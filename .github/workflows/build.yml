@@ -27,19 +27,6 @@ jobs:
           Copy-Item -Force (Join-Path $ffmpegDir.FullName "bin\ffmpeg.exe") artifacts/tools/ffmpeg.exe
           Copy-Item -Force (Join-Path $ffmpegDir.FullName "bin\ffprobe.exe") artifacts/tools/ffprobe.exe
 
-          $dvdauthorUrl = "https://github.com/ldo/dvdauthor/releases/latest/download/dvdauthor-win64.zip"
-          $dvdauthorZip = "artifacts/dvdauthor.zip"
-          Invoke-WebRequest -Uri $dvdauthorUrl -OutFile $dvdauthorZip
-          Expand-Archive -Path $dvdauthorZip -DestinationPath artifacts/dvdauthor -Force
-          Copy-Item -Force (Get-ChildItem artifacts/dvdauthor -Recurse -Filter dvdauthor.exe | Select-Object -First 1).FullName artifacts/tools/dvdauthor.exe
-
-          $xorrisoUrl = "https://github.com/Distrotech/xorriso/releases/latest/download/xorriso-win64.zip"
-          $xorrisoZip = "artifacts/xorriso.zip"
-          Invoke-WebRequest -Uri $xorrisoUrl -OutFile $xorrisoZip
-          Expand-Archive -Path $xorrisoZip -DestinationPath artifacts/xorriso -Force
-          Copy-Item -Force (Get-ChildItem artifacts/xorriso -Recurse -Filter xorriso.exe | Select-Object -First 1).FullName artifacts/tools/xorriso.exe
-
-
       - name: setup dotnet
         uses: actions/setup-dotnet@v4
         with:
