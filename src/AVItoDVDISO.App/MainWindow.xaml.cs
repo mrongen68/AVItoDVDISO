@@ -1,63 +1,138 @@
+using System;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
+using Microsoft.Win32;
+using AVItoDVDISO.Tools;
 
-namespace AVItoDVDISO.App;
-
-public partial class MainWindow : Window
+namespace AVItoDVDISO.App
 {
-    private readonly MainViewModel _vm;
-
-    public MainWindow()
+    public partial class MainWindow : Window
     {
-        InitializeComponent();
-        _vm = new MainViewModel();
-        DataContext = _vm;
-        _vm.Initialize();
-    }
+        public MainWindow()
+        {
+            InitializeComponent();
 
-    private void Add_Click(object sender, RoutedEventArgs e)
-    {
-        var ofd = new Microsoft.Win32.OpenFileDialog
+            var vm = new MainViewModel();
+            DataContext = vm;
+
+            Loaded += (_, _) =>
+            {
+                try
+                {
+                    vm.Initialize();
+                }
+                catch (Exception ex)
+                {
+                    System.Windows.MessageBox.Show(this, ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            };
+        }
+
+        private MainViewModel VM => (MainViewModel)DataContext;
+
+        private void AddFiles_Click(object sender, RoutedEventArgs e)
         {
-            Title = "Select video files",
-            Filter = "Video files|*.avi;*.mp4;*.mkv;*.mov;*.mpeg;*.mpg|All files|*.*",
-            Multiselect = true
-        };
-        if (ofd.ShowDialog() == true)
+            var dlg = new OpenFileDialog
+            {
+                Title = "Select video files",
+                Filter = "Video files|*.avi;*.mp4;*.mkv;*.mov;*.mpg;*.mpeg;*.wmv|All files|*.*",
+                Multiselect = true
+            };
+
+            if (dlg.ShowDialog(this) == true)
+            {
+                foreach (var f in dlg.FileNames)
+                    VM.AddSource(f);
+            }
+        }
+
+        private void Remove_Click(object sender, RoutedEventArgs e)
         {
-            foreach (var f in ofd.FileNames)
-                _vm.AddSource(f);
+            VM.RemoveSelected();
+        }
+
+        private void MoveUp_Click(object sender, RoutedEventArgs e)
+        {
+            VM.MoveSelected(-1);
+        }
+
+        private void MoveDown_Click(object sender, RoutedEventArgs e)
+        {
+            VM.MoveSelected(1);
+        }
+
+        private void BrowseOutput_Click(object sender, RoutedEventArgs e)
+        {
+            using var dlg = new System.Windows.Forms.FolderBrowserDialog
+            {
+                Description = "Select output folder",
+                UseDescriptionForTitle = true,
+                ShowNewFolderButton = true
+            };
+
+            var result = dlg.ShowDialog();
+            if (result == System.Windows.Forms.DialogResult.OK && Directory.Exists(dlg.SelectedPath))
+            {
+                VM.OutputPath = dlg.SelectedPath;
+            }
+        }
+
+        private void OpenOutput_Click(object sender, RoutedEventArgs e)
+        {
+            VM.OpenOutputFolder();
+        }
+
+        private void Cancel_Click(object sender, RoutedEventArgs e)
+        {
+            VM.Cancel();
+        }
+
+        private async void Convert_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var toolsDir = Path.Combine(AppContext.BaseDirectory, "tools");
+                var needDvdauthor = VM.ExportFolder;
+                var needXorriso = VM.ExportIso;
+
+                var mgr = new ToolManager();
+                if (!mgr.HasAllRequiredTools(toolsDir, needDvdauthor, needXorriso))
+                {
+                    var msg =
+                        "Required tools are missing and will be downloaded to the tools folder.\n\n" +
+                        "This may take a few minutes.\n\n" +
+                        "Continue?";
+                    var res = System.Windows.MessageBox.Show(this, msg, "Download tools", MessageBoxButton.OKCancel, MessageBoxImage.Question);
+                    if (res != MessageBoxResult.OK)
+                        return;
+
+                    VM.LogText += "Downloading required tools..." + Environment.NewLine;
+
+                    var status = await mgr.EnsureToolsAsync(
+                        toolsDir,
+                        needDvdauthor,
+                        needXorriso,
+                        line => VM.LogText += line + Environment.NewLine,
+                        CancellationToken.None);
+
+                    if (!status.Ok)
+                    {
+                        System.Windows.MessageBox.Show(this, status.Message, "Tools download failed", MessageBoxButton.OK, MessageBoxImage.Error);
+                        VM.LogText += "Tools download failed: " + status.Message + Environment.NewLine;
+                        return;
+                    }
+
+                    VM.LogText += "Tools ready." + Environment.NewLine;
+                }
+
+                await VM.StartConvertAsync();
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show(this, ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
     }
-
-    private void Remove_Click(object sender, RoutedEventArgs e) => _vm.RemoveSelected();
-    private void Up_Click(object sender, RoutedEventArgs e) => _vm.MoveSelected(-1);
-    private void Down_Click(object sender, RoutedEventArgs e) => _vm.MoveSelected(1);
-
-    private void Browse_Click(object sender, RoutedEventArgs e)
-    {
-        using var dlg = new System.Windows.Forms.FolderBrowserDialog();
-        dlg.Description = "Select output folder";
-        dlg.UseDescriptionForTitle = true;
-
-        var res = dlg.ShowDialog();
-        if (res == System.Windows.Forms.DialogResult.OK)
-            _vm.OutputPath = dlg.SelectedPath;
-    }
-
-    private async void Convert_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            await _vm.StartConvertAsync();
-        }
-        catch (Exception ex)
-        {
-            System.Windows.MessageBox.Show(this, ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
-
-    private void Cancel_Click(object sender, RoutedEventArgs e) => _vm.Cancel();
-    private void OpenOutput_Click(object sender, RoutedEventArgs e) => _vm.OpenOutputFolder();
-
 }
-
