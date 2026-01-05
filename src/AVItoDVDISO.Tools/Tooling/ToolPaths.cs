@@ -1,6 +1,3 @@
-# ---------------------------------
-# File: src\AVItoDVDISO.Tools\Tooling\ToolPaths.cs
-# ---------------------------------
 namespace AVItoDVDISO.Tools.Tooling;
 
 public sealed class ToolPaths
@@ -25,4 +22,5 @@ public sealed class ToolPaths
         if (!File.Exists(path))
             throw new FileNotFoundException("Missing required tool.", path);
     }
+
 }
