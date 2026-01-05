@@ -1,0 +1,11 @@
+# ---------------------------------
+# File: licenses\THIRD_PARTY_NOTICES.txt
+# ---------------------------------
+This application bundles or invokes third party tools. You must provide the applicable notices and licenses.
+
+Expected tools:
+- FFmpeg (ffmpeg.exe, ffprobe.exe)
+- dvdauthor (dvdauthor.exe)
+- xorriso (xorriso.exe)
+
+Place the license texts and attribution for the specific binaries you distribute in this folder.

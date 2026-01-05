@@ -1,0 +1,35 @@
+# ---------------------------------
+# File: AVItoDVDISO.sln
+# ---------------------------------
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AVItoDVDISO.App", "src\AVItoDVDISO.App\AVItoDVDISO.App.csproj", "{E2B2B9A2-04D6-4E3B-9D8D-1A3DDA1B8A31}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AVItoDVDISO.Core", "src\AVItoDVDISO.Core\AVItoDVDISO.Core.csproj", "{C4BE8F6F-A7C0-4F4A-9BC5-0C6B82C03D47}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AVItoDVDISO.Tools", "src\AVItoDVDISO.Tools\AVItoDVDISO.Tools.csproj", "{C0B5C88A-BC7A-4EE3-9F3B-4D0D2072F835}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{E2B2B9A2-04D6-4E3B-9D8D-1A3DDA1B8A31}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E2B2B9A2-04D6-4E3B-9D8D-1A3DDA1B8A31}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E2B2B9A2-04D6-4E3B-9D8D-1A3DDA1B8A31}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E2B2B9A2-04D6-4E3B-9D8D-1A3DDA1B8A31}.Release|Any CPU.Build.0 = Release|Any CPU
+
+		{C4BE8F6F-A7C0-4F4A-9BC5-0C6B82C03D47}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C4BE8F6F-A7C0-4F4A-9BC5-0C6B82C03D47}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C4BE8F6F-A7C0-4F4A-9BC5-0C6B82C03D47}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C4BE8F6F-A7C0-4F4A-9BC5-0C6B82C03D47}.Release|Any CPU.Build.0 = Release|Any CPU
+
+		{C0B5C88A-BC7A-4EE3-9F3B-4D0D2072F835}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C0B5C88A-BC7A-4EE3-9F3B-4D0D2072F835}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C0B5C88A-BC7A-4EE3-9F3B-4D0D2072F835}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C0B5C88A-BC7A-4EE3-9F3B-4D0D2072F835}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

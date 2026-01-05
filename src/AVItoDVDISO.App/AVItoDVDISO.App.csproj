@@ -1,0 +1,24 @@
+# ---------------------------------
+# File: src\AVItoDVDISO.App\AVItoDVDISO.App.csproj
+# ---------------------------------
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationIcon></ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AVItoDVDISO.Core\AVItoDVDISO.Core.csproj" />
+    <ProjectReference Include="..\AVItoDVDISO.Tools\AVItoDVDISO.Tools.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\presets\presets.json" Link="presets\presets.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

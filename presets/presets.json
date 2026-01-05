@@ -1,0 +1,38 @@
+# ---------------------------------
+# File: presets\presets.json
+# ---------------------------------
+{
+  "version": 1,
+  "defaults": {
+    "dvdMode": "PAL",
+    "aspect": "Auto",
+    "chapters": { "mode": "Off", "minutes": 5 },
+    "presetId": "fit",
+    "exportFolder": true,
+    "exportIso": true,
+    "discLabel": "AVITODVD"
+  },
+  "presets": [
+    {
+      "id": "fit",
+      "name": "Fit to DVD (4.7GB)",
+      "encodeMode": "Fit",
+      "audio": { "codec": "ac3", "bitrateKbps": 192, "sampleRateHz": 48000, "channels": 2 },
+      "video": { "maxRateKbps": 8000, "bufSizeKbps": 1835, "minRateKbps": 2000, "twoPass": true }
+    },
+    {
+      "id": "best",
+      "name": "Best quality",
+      "encodeMode": "Best",
+      "audio": { "codec": "ac3", "bitrateKbps": 192, "sampleRateHz": 48000, "channels": 2 },
+      "video": { "targetRateKbps": 8000, "maxRateKbps": 8000, "bufSizeKbps": 1835, "twoPass": true }
+    },
+    {
+      "id": "fast",
+      "name": "Fast",
+      "encodeMode": "Fast",
+      "audio": { "codec": "ac3", "bitrateKbps": 192, "sampleRateHz": 48000, "channels": 2 },
+      "video": { "targetRateKbps": 5000, "maxRateKbps": 8000, "bufSizeKbps": 1835, "twoPass": false }
+    }
+  ]
+}
