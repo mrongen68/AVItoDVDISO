@@ -1,9 +1,7 @@
 using System;
 using System.IO;
 using System.Threading;
-using System.Threading.Tasks;
 using System.Windows;
-using Microsoft.Win32;
 using AVItoDVDISO.Tools;
 
 namespace AVItoDVDISO.App
@@ -32,9 +30,10 @@ namespace AVItoDVDISO.App
 
         private MainViewModel VM => (MainViewModel)DataContext;
 
-        private void AddFiles_Click(object sender, RoutedEventArgs e)
+        // XAML expects Add_Click
+        private void Add_Click(object sender, RoutedEventArgs e)
         {
-            var dlg = new OpenFileDialog
+            var dlg = new Microsoft.Win32.OpenFileDialog
             {
                 Title = "Select video files",
                 Filter = "Video files|*.avi;*.mp4;*.mkv;*.mov;*.mpg;*.mpeg;*.wmv|All files|*.*",
@@ -53,17 +52,20 @@ namespace AVItoDVDISO.App
             VM.RemoveSelected();
         }
 
-        private void MoveUp_Click(object sender, RoutedEventArgs e)
+        // XAML expects Up_Click
+        private void Up_Click(object sender, RoutedEventArgs e)
         {
             VM.MoveSelected(-1);
         }
 
-        private void MoveDown_Click(object sender, RoutedEventArgs e)
+        // XAML expects Down_Click
+        private void Down_Click(object sender, RoutedEventArgs e)
         {
             VM.MoveSelected(1);
         }
 
-        private void BrowseOutput_Click(object sender, RoutedEventArgs e)
+        // XAML expects Browse_Click
+        private void Browse_Click(object sender, RoutedEventArgs e)
         {
             using var dlg = new System.Windows.Forms.FolderBrowserDialog
             {
