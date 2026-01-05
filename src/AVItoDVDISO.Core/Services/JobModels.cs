@@ -1,6 +1,3 @@
-# ---------------------------------
-# File: src\AVItoDVDISO.Core\Services\JobModels.cs
-# ---------------------------------
 using AVItoDVDISO.Core.Models;
 
 namespace AVItoDVDISO.Core.Services;
@@ -20,4 +17,5 @@ public sealed class ConvertProgress
     public required string Stage { get; init; } // Probe, Transcode, Author, Iso
     public int Percent { get; init; }
     public string? Message { get; init; }
+
 }
