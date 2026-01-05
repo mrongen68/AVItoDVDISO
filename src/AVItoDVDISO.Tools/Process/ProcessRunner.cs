@@ -1,6 +1,3 @@
-# ---------------------------------
-# File: src\AVItoDVDISO.Tools\Process\ProcessRunner.cs
-# ---------------------------------
 using System.Diagnostics;
 using AVItoDVDISO.Core.Services;
 
@@ -66,4 +63,5 @@ public sealed class ProcessRunner
         _log.Add($"EXIT: {exitCode}");
         return exitCode;
     }
+
 }
