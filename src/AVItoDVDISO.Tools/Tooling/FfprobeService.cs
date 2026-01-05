@@ -1,6 +1,3 @@
-# ---------------------------------
-# File: src\AVItoDVDISO.Tools\Tooling\FfprobeService.cs
-# ---------------------------------
 using System.Text.Json;
 using AVItoDVDISO.Core.Models;
 using AVItoDVDISO.Core.Services;
@@ -138,4 +135,5 @@ public sealed class FfprobeService
 
         return 0;
     }
+
 }
