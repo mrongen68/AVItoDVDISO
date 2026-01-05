@@ -1,6 +1,3 @@
-# ---------------------------------
-# File: src\AVItoDVDISO.Core\Services\BitrateCalculator.cs
-# ---------------------------------
 using AVItoDVDISO.Core.Models;
 
 namespace AVItoDVDISO.Core.Services;
@@ -26,4 +23,5 @@ public static class BitrateCalculator
 
         return videoKbps;
     }
+
 }
