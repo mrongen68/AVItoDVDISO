@@ -1,6 +1,3 @@
-# ---------------------------------
-# File: src\AVItoDVDISO.Core\Models\SourceItem.cs
-# ---------------------------------
 namespace AVItoDVDISO.Core.Models;
 
 public sealed class SourceItem
@@ -18,4 +15,5 @@ public sealed class SourceItem
     public int AudioSampleRateHz { get; set; }
 
     public override string ToString() => $"{FileName} ({Duration})";
+
 }
