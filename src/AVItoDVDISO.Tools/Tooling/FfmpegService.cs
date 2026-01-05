@@ -1,6 +1,3 @@
-# ---------------------------------
-# File: src\AVItoDVDISO.Tools\Tooling\FfmpegService.cs
-# ---------------------------------
 using AVItoDVDISO.Core.Models;
 using AVItoDVDISO.Core.Services;
 using AVItoDVDISO.Tools.Process;
@@ -81,4 +78,5 @@ public sealed class FfmpegService
         _log.Add($"Transcoded: {outputMpgPath}");
         return outputMpgPath;
     }
+
 }
