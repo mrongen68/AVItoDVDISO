@@ -1,6 +1,3 @@
-# ---------------------------------
-# File: src\AVItoDVDISO.Core\Services\PresetsService.cs
-# ---------------------------------
 using System.Text.Json;
 using AVItoDVDISO.Core.Models;
 
@@ -29,4 +26,5 @@ public sealed class PresetsService
 
         return root;
     }
+
 }
