@@ -1,6 +1,3 @@
-# ---------------------------------
-# File: src\AVItoDVDISO.Core\Services\Logging.cs
-# ---------------------------------
 using System.Collections.Concurrent;
 
 namespace AVItoDVDISO.Core.Services;
@@ -21,4 +18,5 @@ public sealed class LogBuffer
     {
         return _lines.ToArray();
     }
+
 }
