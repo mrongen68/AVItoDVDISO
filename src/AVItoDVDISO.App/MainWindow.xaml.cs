@@ -1,6 +1,3 @@
-# ---------------------------------
-# File: src\AVItoDVDISO.App\MainWindow.xaml.cs (REPLACE CONTENT WITH THIS)
-# ---------------------------------
 using System.Windows;
 
 namespace AVItoDVDISO.App;
@@ -61,4 +58,5 @@ public partial class MainWindow : Window
 
     private void Cancel_Click(object sender, RoutedEventArgs e) => _vm.Cancel();
     private void OpenOutput_Click(object sender, RoutedEventArgs e) => _vm.OpenOutputFolder();
+
 }
