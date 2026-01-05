@@ -1,6 +1,3 @@
-# ---------------------------------
-# File: src\AVItoDVDISO.Tools\Tooling\XorrisoService.cs
-# ---------------------------------
 using AVItoDVDISO.Core.Services;
 using AVItoDVDISO.Tools.Process;
 
@@ -32,4 +29,5 @@ public sealed class XorrisoService
         _log.Add($"Built ISO: {isoPath}");
         return isoPath;
     }
+
 }
