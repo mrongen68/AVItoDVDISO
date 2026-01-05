@@ -45,6 +45,12 @@ jobs:
         shell: pwsh
         run: |
           ./build/bundle.ps1 -Configuration Release -PublishDir artifacts/publish -OutDir artifacts/bundle
+          
+      - name: list artifacts folder
+        shell: pwsh
+        run: |
+          Write-Host "Artifacts root:"
+          Get-ChildItem -Path artifacts -Recurse | Select-Object FullName
 
       - name: upload artifact
         uses: actions/upload-artifact@v4
