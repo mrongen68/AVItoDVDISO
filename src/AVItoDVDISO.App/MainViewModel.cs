@@ -1,6 +1,3 @@
-# ---------------------------------
-# File: src\AVItoDVDISO.App\MainViewModel.cs
-# ---------------------------------
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -263,4 +260,5 @@ public sealed class MainViewModel : INotifyPropertyChanged
 # - Add_Click, Remove_Click, Up_Click, Down_Click, Browse_Click, Convert_Click, Cancel_Click, OpenOutput_Click
 # The duplicates were included here as placeholder noise and should be deleted.
 # Replace MainWindow.xaml.cs with the file below.
+
 # ---------------------------------
