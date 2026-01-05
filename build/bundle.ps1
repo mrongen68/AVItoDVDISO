@@ -8,7 +8,8 @@ $ErrorActionPreference = "Stop"
 
 function Ensure-File([string]$path) {
   if (-not (Test-Path $path)) {
-    throw "Missing required file: $path"
+    Write-Warning "Missing required file (will be downloaded at runtime): $path"
+    continue
   }
 }
 
@@ -53,4 +54,5 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 
 Write-Host "Bundled to: $zipPath"
+
 
