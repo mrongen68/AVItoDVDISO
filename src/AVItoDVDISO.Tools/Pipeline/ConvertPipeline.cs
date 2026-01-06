@@ -197,9 +197,7 @@ public sealed class ConvertPipeline
         onProgress(MakeProgress("Done", "Completed", 100));
 
         if (!string.IsNullOrWhiteSpace(exportedVideoTs))
-        {
             TryLog($"Exported VIDEO_TS to: {exportedVideoTs}");
-        }
     }
 
     private static ConvertProgress MakeProgress(string stage, string message, int percent)
@@ -233,9 +231,10 @@ public sealed class ConvertPipeline
     {
         ct.ThrowIfCancellationRequested();
 
-        var result = await runner.RunAsync(exe, args, workingDir, ct).ConfigureAwait(false);
-        if (result.ExitCode != 0)
-            throw new InvalidOperationException($"{Path.GetFileName(exe)} failed with exit code {result.ExitCode}. See log for details.");
+        // In this solution ProcessRunner.RunAsync returns an int (exit code).
+        var exitCode = await runner.RunAsync(exe, args, workingDir, ct).ConfigureAwait(false);
+        if (exitCode != 0)
+            throw new InvalidOperationException($"{Path.GetFileName(exe)} failed with exit code {exitCode}. See log for details.");
     }
 
     private static string BuildFfmpegDvdArgs(string inputPath, string outputMpegPath, DvdMode dvdMode, AspectMode aspect)
@@ -247,8 +246,6 @@ public sealed class ConvertPipeline
 
         var fps = isNtsc ? "30000/1001" : "25";
 
-        // DVD-Video MPEG-2 + AC3 audio, broadly compatible defaults.
-        // Keep simple: scale + pad to exact DVD frame, fixed fps, and standard GOP.
         var vf = $"scale={targetW}:{targetH}:force_original_aspect_ratio=decrease,pad={targetW}:{targetH}:(ow-iw)/2:(oh-ih)/2,setsar=1";
 
         var aspectFlag = aspect switch
@@ -258,8 +255,7 @@ public sealed class ConvertPipeline
             _ => ""
         };
 
-        // Bitrates: safe DVD-ish defaults.
-        var vbitrate = isNtsc ? "6000k" : "6000k";
+        var vbitrate = "6000k";
         var vmax = "8000k";
         var vbuf = "1835k";
 
@@ -295,8 +291,6 @@ public sealed class ConvertPipeline
         {
             if (chaptersMode == ChapterMode.EveryNMinutes)
             {
-                // dvdauthor supports chapter list like "00:05:00,00:10:00,..." but we do not know total duration here.
-                // We emit a single interval marker which dvdauthor interprets for auto chapters in some builds, otherwise it is ignored safely.
                 var ch = $"00:{chaptersEveryMinutes:00}:00";
                 sb.AppendLine($"        <vob file=\"{EscapeXml(mpg)}\" chapters=\"{ch}\" />");
             }
@@ -386,8 +380,6 @@ public sealed class ConvertPipeline
     {
         try
         {
-            // LogBuffer in this solution exposes an event LineAdded, but method names may differ between versions.
-            // We avoid hard dependency: if Add(string) exists it will be used via dynamic; otherwise do nothing.
             var d = (dynamic)_log;
             d.Add(line);
         }
