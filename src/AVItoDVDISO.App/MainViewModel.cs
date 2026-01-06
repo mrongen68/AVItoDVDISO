@@ -5,7 +5,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using AVItoDVDISO.Core.Models;
 using AVItoDVDISO.Core.Services;
-using AVItoDVDISO.Tools.Pipeline;
+using AVItoDVDISO.Tools;
 using System.IO;
 using System.Linq;
 
@@ -115,46 +115,45 @@ public sealed class MainViewModel : INotifyPropertyChanged
         Raise(nameof(TotalDurationText));
     }
 
-public void AddSource(string path)
-{
-    var item = new SourceItem { Path = path };
-    Sources.Add(item);
-
-    Raise(nameof(CanConvert));
-    Raise(nameof(TotalDurationText));
-
-    _ = Task.Run(async () =>
+    public void AddSource(string path)
     {
-        try
+        var item = new SourceItem { Path = path };
+        Sources.Add(item);
+
+        Raise(nameof(CanConvert));
+        Raise(nameof(TotalDurationText));
+
+        _ = Task.Run(async () =>
         {
-            var toolsDir = Path.Combine(AppContext.BaseDirectory, "tools");
-            var ffprobePath = Path.Combine(toolsDir, "ffprobe.exe");
-
-            if (!File.Exists(ffprobePath))
-                return;
-
-            var meta = await ProbeWithFfprobeAsync(ffprobePath, path).ConfigureAwait(false);
-
-            App.Current.Dispatcher.Invoke(() =>
+            try
             {
-                item.Duration = meta.Duration;
-                item.VideoWidth = meta.Width;
-                item.VideoHeight = meta.Height;
-                item.Fps = meta.Fps;
-                item.HasAudio = meta.HasAudio;
-                item.AudioChannels = meta.AudioChannels;
-                item.AudioSampleRateHz = meta.AudioSampleRateHz;
+                var toolsDir = Path.Combine(AppContext.BaseDirectory, "tools");
+                var ffprobePath = Path.Combine(toolsDir, "ffprobe.exe");
 
-                Raise(nameof(TotalDurationText));
-            });
-        }
-        catch
-        {
-            // ignore probe errors, conversion can still run later
-        }
-    });
-}
+                if (!File.Exists(ffprobePath))
+                    return;
 
+                var meta = await ProbeWithFfprobeAsync(ffprobePath, path).ConfigureAwait(false);
+
+                App.Current.Dispatcher.Invoke(() =>
+                {
+                    item.Duration = meta.Duration;
+                    item.VideoWidth = meta.Width;
+                    item.VideoHeight = meta.Height;
+                    item.Fps = meta.Fps;
+                    item.HasAudio = meta.HasAudio;
+                    item.AudioChannels = meta.AudioChannels;
+                    item.AudioSampleRateHz = meta.AudioSampleRateHz;
+
+                    Raise(nameof(TotalDurationText));
+                });
+            }
+            catch
+            {
+                // ignore probe errors, conversion can still run later
+            }
+        });
+    }
 
     public void RemoveSelected()
     {
@@ -213,6 +212,7 @@ public void AddSource(string path)
         _cts = new CancellationTokenSource();
         var ct = _cts.Token;
 
+        // Belangrijkste aanpassing: gebruik ConvertPipeline direct uit AVItoDVDISO.Tools (zonder .Pipeline namespace)
         var pipeline = new ConvertPipeline(log);
 
         var dvd = new DvdSettings
@@ -298,125 +298,122 @@ public void AddSource(string path)
         if (clean.Length == 0) clean = "AVITODVD";
         return clean;
     }
+
     private sealed class ProbeResult
-{
-    public TimeSpan Duration { get; init; }
-    public int Width { get; init; }
-    public int Height { get; init; }
-    public double Fps { get; init; }
-    public bool HasAudio { get; init; }
-    public int AudioChannels { get; init; }
-    public int AudioSampleRateHz { get; init; }
-}
-
-private static async Task<ProbeResult> ProbeWithFfprobeAsync(string ffprobeExe, string inputPath)
-{
-    // Ask ffprobe for JSON so we can parse duration reliably
-    var args =
-        "-v error " +
-        "-print_format json " +
-        "-show_entries format=duration " +
-        "-show_entries stream=index,codec_type,width,height,r_frame_rate,channels,sample_rate " +
-        $"\"{inputPath}\"";
-
-    var psi = new ProcessStartInfo
     {
-        FileName = ffprobeExe,
-        Arguments = args,
-        UseShellExecute = false,
-        RedirectStandardOutput = true,
-        RedirectStandardError = true,
-        CreateNoWindow = true
-    };
-
-    using var p = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start ffprobe.");
-    var stdout = await p.StandardOutput.ReadToEndAsync().ConfigureAwait(false);
-    _ = await p.StandardError.ReadToEndAsync().ConfigureAwait(false);
-    await p.WaitForExitAsync().ConfigureAwait(false);
-
-    if (p.ExitCode != 0 || string.IsNullOrWhiteSpace(stdout))
-        return new ProbeResult { Duration = TimeSpan.Zero };
-
-    using var doc = System.Text.Json.JsonDocument.Parse(stdout);
-
-    double durationSeconds = 0.0;
-    if (doc.RootElement.TryGetProperty("format", out var formatEl) &&
-        formatEl.TryGetProperty("duration", out var durEl) &&
-        durEl.ValueKind == System.Text.Json.JsonValueKind.String &&
-        double.TryParse(durEl.GetString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d))
-    {
-        durationSeconds = d;
+        public TimeSpan Duration { get; init; }
+        public int Width { get; init; }
+        public int Height { get; init; }
+        public double Fps { get; init; }
+        public bool HasAudio { get; init; }
+        public int AudioChannels { get; init; }
+        public int AudioSampleRateHz { get; init; }
     }
 
-    int width = 0, height = 0;
-    double fps = 0.0;
-
-    bool hasAudio = false;
-    int audioChannels = 0;
-    int audioSampleRate = 0;
-
-    if (doc.RootElement.TryGetProperty("streams", out var streamsEl) &&
-        streamsEl.ValueKind == System.Text.Json.JsonValueKind.Array)
+    private static async Task<ProbeResult> ProbeWithFfprobeAsync(string ffprobeExe, string inputPath)
     {
-        foreach (var s in streamsEl.EnumerateArray())
+        var args =
+            "-v error " +
+            "-print_format json " +
+            "-show_entries format=duration " +
+            "-show_entries stream=index,codec_type,width,height,r_frame_rate,channels,sample_rate " +
+            $"\"{inputPath}\"";
+
+        var psi = new ProcessStartInfo
         {
-            if (!s.TryGetProperty("codec_type", out var ctEl)) continue;
-            var ct = ctEl.GetString();
+            FileName = ffprobeExe,
+            Arguments = args,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
 
-            if (ct == "video")
+        using var p = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start ffprobe.");
+        var stdout = await p.StandardOutput.ReadToEndAsync().ConfigureAwait(false);
+        _ = await p.StandardError.ReadToEndAsync().ConfigureAwait(false);
+        await p.WaitForExitAsync().ConfigureAwait(false);
+
+        if (p.ExitCode != 0 || string.IsNullOrWhiteSpace(stdout))
+            return new ProbeResult { Duration = TimeSpan.Zero };
+
+        using var doc = System.Text.Json.JsonDocument.Parse(stdout);
+
+        double durationSeconds = 0.0;
+        if (doc.RootElement.TryGetProperty("format", out var formatEl) &&
+            formatEl.TryGetProperty("duration", out var durEl) &&
+            durEl.ValueKind == System.Text.Json.JsonValueKind.String &&
+            double.TryParse(durEl.GetString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d))
+        {
+            durationSeconds = d;
+        }
+
+        int width = 0, height = 0;
+        double fps = 0.0;
+
+        bool hasAudio = false;
+        int audioChannels = 0;
+        int audioSampleRate = 0;
+
+        if (doc.RootElement.TryGetProperty("streams", out var streamsEl) &&
+            streamsEl.ValueKind == System.Text.Json.JsonValueKind.Array)
+        {
+            foreach (var s in streamsEl.EnumerateArray())
             {
-                if (s.TryGetProperty("width", out var wEl) && wEl.ValueKind == System.Text.Json.JsonValueKind.Number)
-                    width = wEl.GetInt32();
-                if (s.TryGetProperty("height", out var hEl) && hEl.ValueKind == System.Text.Json.JsonValueKind.Number)
-                    height = hEl.GetInt32();
+                if (!s.TryGetProperty("codec_type", out var ctEl)) continue;
+                var ct = ctEl.GetString();
 
-                if (s.TryGetProperty("r_frame_rate", out var rEl) && rEl.ValueKind == System.Text.Json.JsonValueKind.String)
+                if (ct == "video")
                 {
-                    fps = ParseFps(rEl.GetString());
+                    if (s.TryGetProperty("width", out var wEl) && wEl.ValueKind == System.Text.Json.JsonValueKind.Number)
+                        width = wEl.GetInt32();
+                    if (s.TryGetProperty("height", out var hEl) && hEl.ValueKind == System.Text.Json.JsonValueKind.Number)
+                        height = hEl.GetInt32();
+
+                    if (s.TryGetProperty("r_frame_rate", out var rEl) && rEl.ValueKind == System.Text.Json.JsonValueKind.String)
+                    {
+                        fps = ParseFps(rEl.GetString());
+                    }
+                }
+                else if (ct == "audio")
+                {
+                    hasAudio = true;
+
+                    if (s.TryGetProperty("channels", out var chEl) && chEl.ValueKind == System.Text.Json.JsonValueKind.Number)
+                        audioChannels = chEl.GetInt32();
+
+                    if (s.TryGetProperty("sample_rate", out var srEl) && srEl.ValueKind == System.Text.Json.JsonValueKind.String &&
+                        int.TryParse(srEl.GetString(), out var sr))
+                        audioSampleRate = sr;
                 }
             }
-            else if (ct == "audio")
-            {
-                hasAudio = true;
-
-                if (s.TryGetProperty("channels", out var chEl) && chEl.ValueKind == System.Text.Json.JsonValueKind.Number)
-                    audioChannels = chEl.GetInt32();
-
-                if (s.TryGetProperty("sample_rate", out var srEl) && srEl.ValueKind == System.Text.Json.JsonValueKind.String &&
-                    int.TryParse(srEl.GetString(), out var sr))
-                    audioSampleRate = sr;
-            }
         }
+
+        return new ProbeResult
+        {
+            Duration = durationSeconds > 0 ? TimeSpan.FromSeconds(durationSeconds) : TimeSpan.Zero,
+            Width = width,
+            Height = height,
+            Fps = fps,
+            HasAudio = hasAudio,
+            AudioChannels = audioChannels,
+            AudioSampleRateHz = audioSampleRate
+        };
     }
 
-    return new ProbeResult
+    private static double ParseFps(string? rate)
     {
-        Duration = durationSeconds > 0 ? TimeSpan.FromSeconds(durationSeconds) : TimeSpan.Zero,
-        Width = width,
-        Height = height,
-        Fps = fps,
-        HasAudio = hasAudio,
-        AudioChannels = audioChannels,
-        AudioSampleRateHz = audioSampleRate
-    };
-}
-
-private static double ParseFps(string? rate)
-{
-    if (string.IsNullOrWhiteSpace(rate)) return 0.0;
-    var parts = rate.Split('/');
-    if (parts.Length == 2 &&
-        double.TryParse(parts[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var n) &&
-        double.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d) &&
-        d != 0.0)
-    {
-        return n / d;
+        if (string.IsNullOrWhiteSpace(rate)) return 0.0;
+        var parts = rate.Split('/');
+        if (parts.Length == 2 &&
+            double.TryParse(parts[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var n) &&
+            double.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d) &&
+            d != 0.0)
+        {
+            return n / d;
+        }
+        if (double.TryParse(rate, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v))
+            return v;
+        return 0.0;
     }
-    if (double.TryParse(rate, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v))
-        return v;
-    return 0.0;
 }
-
-}
-
-
