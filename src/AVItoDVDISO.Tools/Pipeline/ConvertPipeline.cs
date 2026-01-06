@@ -206,22 +206,84 @@ public sealed class ConvertPipeline
             throw new InvalidOperationException("ffmpeg finished without producing MPG: " + outMpg);
     }
 
-    private string BuildDvdauthorXml(List<string> mpgFiles)
-    {
-        // Multiple titles: one PGC with multiple VOB entries is acceptable for basic playback
-        var sb = new StringBuilder();
-        sb.AppendLine("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
-        sb.AppendLine("<dvdauthor>");
-        sb.AppendLine("  <vmgm />");
-        sb.AppendLine("  <titleset>");
-        sb.AppendLine("    <titles>");
-        sb.AppendLine("      <pgc>");
+private string BuildDvdauthorXml(List<string> mpgFiles)
+{
+    var sb = new StringBuilder();
 
-        foreach (var f in mpgFiles)
+    sb.AppendLine("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
+    sb.AppendLine("<dvdauthor>");
+    sb.AppendLine("  <vmgm />");
+    sb.AppendLine("  <titleset>");
+    sb.AppendLine("    <titles>");
+    sb.AppendLine("      <pgc>");
+
+    foreach (var f in mpgFiles)
+    {
+        var safe = EscapeXml(f);
+        sb.AppendLine($"        <vob file=\"{safe}\" />");
+    }
+
+    sb.AppendLine("      </pgc>");
+    sb.AppendLine("    </titles>");
+    sb.AppendLine("  </titleset>");
+    sb.AppendLine("</dvdauthor>");
+
+    return sb.ToString();
+}
+
+    private static string EscapeXml(string s)
+    {
+        return s.Replace("&", "&amp;").Replace("\"", "&quot;").Replace("<", "&lt;").Replace(">", "&gt;");
+    }
+
+    private async Task RunProcessAsync(string exe, string args, string workDir, CancellationToken ct)
+    {
+        _log.Add("RUN: " + exe + " " + args);
+
+        var psi = new ProcessStartInfo
         {
-            sb.Append("        <vob file=\"").Append(EscapeXml(f)).Append("\" />").AppendLine();
+            FileName = exe,
+            Arguments = args,
+            WorkingDirectory = workDir,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+
+        using var p = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start process: " + exe);
+
+        var stdoutTask = p.StandardOutput.ReadToEndAsync();
+        var stderrTask = p.StandardError.ReadToEndAsync();
+
+        await p.WaitForExitAsync(ct).ConfigureAwait(false);
+
+        var stdout = await stdoutTask.ConfigureAwait(false);
+        var stderr = await stderrTask.ConfigureAwait(false);
+
+        if (!string.IsNullOrWhiteSpace(stdout)) _log.Add(stdout.TrimEnd());
+        if (!string.IsNullOrWhiteSpace(stderr)) _log.Add(stderr.TrimEnd());
+
+        _log.Add("Exit code: " + p.ExitCode);
+
+        if (p.ExitCode != 0)
+            throw new InvalidOperationException($"Tool failed: {Path.GetFileName(exe)} (exit {p.ExitCode})");
+    }
+
+    private static void CopyDirectory(string srcDir, string dstDir)
+    {
+        Directory.CreateDirectory(dstDir);
+
+        foreach (var file in Directory.GetFiles(srcDir))
+        {
+            var name = Path.GetFileName(file);
+            File.Copy(file, Path.Combine(dstDir, name), true);
         }
 
-        sb.AppendLine("      </pgc>");
-        sb.AppendLine("    </titles>");
-        sb.AppendLine("  </titleset
+        foreach (var dir in Directory.GetDirectories(srcDir))
+        {
+            var name = Path.GetFileName(dir);
+            CopyDirectory(dir, Path.Combine(dstDir, name));
+        }
+    }
+}
