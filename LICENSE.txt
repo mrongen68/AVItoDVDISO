@@ -1,9 +1,7 @@
-# ---------------------------------
-# File: LICENSE.txt
-# ---------------------------------
 GNU GENERAL PUBLIC LICENSE
 Version 3, 29 June 2007
 
 This repository is intended to be licensed under GPL-3.0.
 For the full text of the GPL-3.0 license, include the official GPL-3.0 license text in this file.
+
 If you publish a release, ensure LICENSE.txt contains the full GPL-3.0 text.
