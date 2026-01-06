@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.IO.Compression;
 using System.Net.Http;
 
@@ -18,17 +17,17 @@ public sealed class ToolManager
     public ToolManager()
     {
         _http = new HttpClient();
-        _http.Timeout = TimeSpan.FromMinutes(5);
+        _http.Timeout = TimeSpan.FromMinutes(10);
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("AVItoDVDISO/1.0 (+https://github.com/mrongen68/AVItoDVDISO)");
     }
 
-    public bool HasAllRequiredTools(string toolsDir, bool needDvdauthor, bool needXorriso)
+    public bool HasAllRequiredTools(string toolsDir, bool needDvdauthor, bool needIsoTool)
     {
         if (!File.Exists(Path.Combine(toolsDir, "ffmpeg.exe"))) return false;
         if (!File.Exists(Path.Combine(toolsDir, "ffprobe.exe"))) return false;
 
         if (needDvdauthor && !File.Exists(Path.Combine(toolsDir, "dvdauthor.exe"))) return false;
-        if (needXorriso && !File.Exists(Path.Combine(toolsDir, "xorriso.exe"))) return false;
+        if (needIsoTool && !File.Exists(Path.Combine(toolsDir, "mkisofs.exe"))) return false;
 
         return true;
     }
@@ -36,14 +35,12 @@ public sealed class ToolManager
     public async Task<ToolStatus> EnsureToolsAsync(
         string toolsDir,
         bool needDvdauthor,
-        bool needXorriso,
+        bool needIsoTool,
         Action<string> log,
         CancellationToken ct)
     {
         Directory.CreateDirectory(toolsDir);
 
-        // ffmpeg/ffprobe should already be present from our build step,
-        // but we keep checks here for completeness.
         if (!File.Exists(Path.Combine(toolsDir, "ffmpeg.exe")) || !File.Exists(Path.Combine(toolsDir, "ffprobe.exe")))
         {
             return new ToolStatus
@@ -69,17 +66,17 @@ public sealed class ToolManager
             }
         }
 
-        if (needXorriso && !File.Exists(Path.Combine(toolsDir, "xorriso.exe")))
+        if (needIsoTool && !File.Exists(Path.Combine(toolsDir, "mkisofs.exe")))
         {
-            log("xorriso.exe missing, downloading...");
-            var ok = await DownloadXorrisoAsync(toolsDir, log, ct).ConfigureAwait(false);
+            log("mkisofs.exe missing, downloading...");
+            var ok = await DownloadMkisofsAsync(toolsDir, log, ct).ConfigureAwait(false);
             if (!ok)
             {
                 return new ToolStatus
                 {
                     Ok = false,
-                    MissingTool = "xorriso",
-                    Message = "Failed to download xorriso.exe."
+                    MissingTool = "mkisofs",
+                    Message = "Failed to download mkisofs.exe."
                 };
             }
         }
@@ -89,8 +86,7 @@ public sealed class ToolManager
 
     private async Task<bool> DownloadDvdauthorAsync(string toolsDir, Action<string> log, CancellationToken ct)
     {
-        // Source: VideoHelp "Dvdauthor_winbin" package (zip contains dvdauthor.exe and related utilities)
-        // Note: This is a pragmatic v1 choice. We can later switch to another mirror if needed.
+        // VideoHelp zip, contains dvdauthor.exe
         var url = "https://download.videohelp.com/gfd/edcounter.php?file=download%2Fdvdauthor_winbin.zip";
         var zipPath = Path.Combine(Path.GetTempPath(), "AVItoDVDISO_dvdauthor.zip");
         var extractDir = Path.Combine(Path.GetTempPath(), "AVItoDVDISO_dvdauthor_extract");
@@ -127,12 +123,13 @@ public sealed class ToolManager
         }
     }
 
-    private async Task<bool> DownloadXorrisoAsync(string toolsDir, Action<string> log, CancellationToken ct)
+    private async Task<bool> DownloadMkisofsAsync(string toolsDir, Action<string> log, CancellationToken ct)
     {
-        // Source: PeyTy/xorriso-exe-for-windows (repo zip contains prebuilt xorriso.exe)
-        var url = "https://github.com/PeyTy/xorriso-exe-for-windows/archive/refs/heads/master.zip";
-        var zipPath = Path.Combine(Path.GetTempPath(), "AVItoDVDISO_xorriso.zip");
-        var extractDir = Path.Combine(Path.GetTempPath(), "AVItoDVDISO_xorriso_extract");
+        // SourceForge cdrtools win32 binary zip (contains mkisofs.exe).
+        // mkisofs is the ISO builder we will use instead of xorriso. :contentReference[oaicite:1]{index=1}
+        var url = "https://sourceforge.net/projects/cdrtools/files/alpha/win32/cdrtools-1.11a12-win32-bin.zip/download";
+        var zipPath = Path.Combine(Path.GetTempPath(), "AVItoDVDISO_cdrtools.zip");
+        var extractDir = Path.Combine(Path.GetTempPath(), "AVItoDVDISO_cdrtools_extract");
 
         try
         {
@@ -143,20 +140,20 @@ public sealed class ToolManager
 
             ZipFile.ExtractToDirectory(zipPath, extractDir, true);
 
-            var exe = Directory.GetFiles(extractDir, "xorriso.exe", SearchOption.AllDirectories).FirstOrDefault();
+            var exe = Directory.GetFiles(extractDir, "mkisofs.exe", SearchOption.AllDirectories).FirstOrDefault();
             if (exe is null)
             {
-                log("xorriso.exe not found inside downloaded zip.");
+                log("mkisofs.exe not found inside downloaded zip.");
                 return false;
             }
 
-            File.Copy(exe, Path.Combine(toolsDir, "xorriso.exe"), true);
-            log("xorriso.exe installed.");
+            File.Copy(exe, Path.Combine(toolsDir, "mkisofs.exe"), true);
+            log("mkisofs.exe installed.");
             return true;
         }
         catch (Exception ex)
         {
-            log("xorriso download failed: " + ex.Message);
+            log("mkisofs download failed: " + ex.Message);
             return false;
         }
         finally
