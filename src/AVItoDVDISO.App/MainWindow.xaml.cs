@@ -110,23 +110,23 @@ namespace AVItoDVDISO.App
                     if (res != MessageBoxResult.OK)
                         return;
 
-                    VM.LogText += "Downloading required tools..." + Environment.NewLine;
+                    Dispatcher.Invoke(() => VM.LogText += "Downloading required tools..." + Environment.NewLine);
 
                     var status = await mgr.EnsureToolsAsync(
                         toolsDir,
                         needDvdauthor,
                         needXorriso,
-                        line => VM.LogText += line + Environment.NewLine,
+                        line => Dispatcher.Invoke(() => VM.LogText += line + Environment.NewLine),
                         CancellationToken.None);
 
                     if (!status.Ok)
                     {
                         System.Windows.MessageBox.Show(this, status.Message, "Tools download failed", MessageBoxButton.OK, MessageBoxImage.Error);
-                        VM.LogText += "Tools download failed: " + status.Message + Environment.NewLine;
+                        Dispatcher.Invoke(() => VM.LogText += "Tools download failed: " + status.Message + Environment.NewLine);
                         return;
                     }
 
-                    VM.LogText += "Tools ready." + Environment.NewLine;
+                    Dispatcher.Invoke(() => VM.LogText += "Tools ready." + Environment.NewLine);
                 }
 
                 await VM.StartConvertAsync();
@@ -138,3 +138,4 @@ namespace AVItoDVDISO.App
         }
     }
 }
+
