@@ -1,6 +1,3 @@
-# ---------------------------------
-# File: README.txt
-# ---------------------------------
 AVI to DVD ISO (Windows, portable)
 
 What it does:
@@ -27,4 +24,5 @@ Notes:
 Quick use:
 1) Put tools in tools\
 2) Run AVItoDVDISO.exe
+
 3) Add source files, choose settings, choose output, click Convert
