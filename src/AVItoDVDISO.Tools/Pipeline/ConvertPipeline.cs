@@ -1,7 +1,7 @@
+using System.Diagnostics;
+using System.Text;
 using AVItoDVDISO.Core.Models;
 using AVItoDVDISO.Core.Services;
-using AVItoDVDISO.Tools.Process;
-using AVItoDVDISO.Tools.Tooling;
 
 namespace AVItoDVDISO.Tools.Pipeline;
 
@@ -14,97 +14,214 @@ public sealed class ConvertPipeline
         _log = log;
     }
 
-    public async Task RunAsync(ConvertJobRequest req, Action<ConvertProgress> onProgress, CancellationToken ct)
+    public async Task RunAsync(
+        ConvertJobRequest req,
+        Action<ConvertProgress> progress,
+        CancellationToken ct)
     {
-        var tools = new ToolPaths { ToolsDir = req.ToolsDir };
-        tools.Validate();
+        ct.ThrowIfCancellationRequested();
+
+        ValidateRequest(req);
+
+        var ffmpegExe = Path.Combine(req.ToolsDir, "ffmpeg.exe");
+        var dvdauthorExe = Path.Combine(req.ToolsDir, "dvdauthor.exe");
+        var mkisofsExe = Path.Combine(req.ToolsDir, "mkisofs.exe");
+
+        if (!File.Exists(ffmpegExe))
+            throw new FileNotFoundException("Missing required tool: ffmpeg.exe", ffmpegExe);
+
+        if (req.Output.ExportFolder && !File.Exists(dvdauthorExe))
+            throw new FileNotFoundException("Missing required tool: dvdauthor.exe", dvdauthorExe);
+
+        if (req.Output.ExportIso && !File.Exists(mkisofsExe))
+            throw new FileNotFoundException("Missing required tool: mkisofs.exe", mkisofsExe);
 
         Directory.CreateDirectory(req.WorkingDir);
 
-        var runner = new ProcessRunner(_log);
-        var ffprobe = new FfprobeService(runner, _log, tools);
-        var ffmpeg = new FfmpegService(runner, _log, tools);
-        var dvdauthor = new DvdauthorService(runner, _log, tools);
-        var xorriso = new XorrisoService(runner, _log, tools);
+        var workRoot = Path.Combine(req.WorkingDir, "job_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+        var encodeDir = Path.Combine(workRoot, "encode");
+        var dvdRoot = Path.Combine(workRoot, "dvdroot");
+        var videoTsDir = Path.Combine(dvdRoot, "VIDEO_TS");
 
-        onProgress(new ConvertProgress { Stage = "Probe", Percent = 0, Message = "Probing sources" });
+        Directory.CreateDirectory(encodeDir);
+        Directory.CreateDirectory(dvdRoot);
 
-        foreach (var s in req.Sources)
-        {
-            ct.ThrowIfCancellationRequested();
-            await ffprobe.ProbeAsyncPortable(s, ct);
-        }
+        progress(new ConvertProgress { Stage = "Prepare", Percent = 5, Message = "Starting job" });
+        _log.Add("WorkingDir: " + workRoot);
+        _log.Add("ToolsDir: " + req.ToolsDir);
 
-        var totalDuration = TimeSpan.FromSeconds(req.Sources.Sum(x => x.Duration.TotalSeconds));
+        // 1) Encode each source to DVD-compliant MPEG
+        progress(new ConvertProgress { Stage = "Encode", Percent = 10, Message = "Encoding to DVD MPEG-2" });
 
-        var preset = req.Preset;
-        var encodeMode = Enum.TryParse<EncodeMode>(preset.EncodeMode, ignoreCase: true, out var em) ? em : EncodeMode.Fit;
-
-        int? fitVideoKbps = null;
-        if (encodeMode == EncodeMode.Fit)
-        {
-            fitVideoKbps = BitrateCalculator.CalculateVideoBitrateKbpsFit(
-                totalDuration,
-                preset.Audio.BitrateKbps,
-                preset.Video.MinRateKbps,
-                preset.Video.MaxRateKbps);
-            _log.Add($"Fit bitrate: {fitVideoKbps} kbps");
-        }
-
-        onProgress(new ConvertProgress { Stage = "Transcode", Percent = 0, Message = "Transcoding" });
-
-        var mpgPaths = new List<string>();
-        for (int i = 0; i < req.Sources.Count; i++)
+        var mpegFiles = new List<string>();
+        for (var i = 0; i < req.Sources.Count; i++)
         {
             ct.ThrowIfCancellationRequested();
 
             var src = req.Sources[i];
-            var outMpg = Path.Combine(req.WorkingDir, $"title{i + 1:00}.mpg");
-            var passLog = Path.Combine(req.WorkingDir, $"passlog_title{i + 1:00}");
+            var outMpg = Path.Combine(encodeDir, $"title_{i + 1:00}.mpg");
+            mpegFiles.Add(outMpg);
 
-            await ffmpeg.TranscodeToMpgAsync(
-                src.Path,
-                outMpg,
-                req.Dvd.Mode,
-                req.Dvd.Aspect,
-                preset,
-                fitVideoKbps,
-                passLog,
-                ct);
+            _log.Add($"Encoding {i + 1}/{req.Sources.Count}: {src.Path}");
+            await EncodeToDvdMpegAsync(ffmpegExe, src.Path, outMpg, req, ct).ConfigureAwait(false);
 
-            mpgPaths.Add(outMpg);
-
-            var pct = (int)Math.Round(((i + 1) / (double)req.Sources.Count) * 100);
-            onProgress(new ConvertProgress { Stage = "Transcode", Percent = pct, Message = $"Transcoded {i + 1}/{req.Sources.Count}" });
+            var pct = 10 + (int)Math.Floor(40.0 * (i + 1) / Math.Max(1, req.Sources.Count));
+            progress(new ConvertProgress { Stage = "Encode", Percent = pct, Message = $"Encoded {i + 1}/{req.Sources.Count}" });
         }
 
-        onProgress(new ConvertProgress { Stage = "Author", Percent = 0, Message = "Authoring DVD folder" });
+        // 2) Create DVD folder using dvdauthor (only if needed)
+        if (req.Output.ExportFolder || req.Output.ExportIso)
+        {
+            // For ISO we also need a proper dvdroot
+            progress(new ConvertProgress { Stage = "Author", Percent = 55, Message = "Authoring VIDEO_TS" });
 
-        var dvdFolder = Path.Combine(req.Output.OutputPath, "DVD");
+            if (!File.Exists(dvdauthorExe))
+                throw new FileNotFoundException("dvdauthor.exe is required for VIDEO_TS creation.", dvdauthorExe);
+
+            var xmlPath = Path.Combine(workRoot, "dvdauthor.xml");
+            File.WriteAllText(xmlPath, BuildDvdauthorXml(mpegFiles), Encoding.UTF8);
+
+            _log.Add("dvdauthor.xml: " + xmlPath);
+            await RunProcessAsync(
+                dvdauthorExe,
+                $"-o \"{dvdRoot}\" -x \"{xmlPath}\"",
+                workRoot,
+                ct).ConfigureAwait(false);
+
+            if (!Directory.Exists(videoTsDir))
+                throw new InvalidOperationException("dvdauthor did not create VIDEO_TS folder.");
+
+            progress(new ConvertProgress { Stage = "Author", Percent = 70, Message = "VIDEO_TS created" });
+        }
+
+        // 3) Copy DVD folder to output (if enabled)
         if (req.Output.ExportFolder)
         {
-            if (Directory.Exists(dvdFolder))
-                Directory.Delete(dvdFolder, recursive: true);
+            progress(new ConvertProgress { Stage = "Export", Percent = 75, Message = "Copying DVD folder" });
+
+            var outDvdRoot = req.Output.OutputPath;
+            Directory.CreateDirectory(outDvdRoot);
+
+            var outVideoTs = Path.Combine(outDvdRoot, "VIDEO_TS");
+            var outAudioTs = Path.Combine(outDvdRoot, "AUDIO_TS");
+
+            if (Directory.Exists(outVideoTs)) Directory.Delete(outVideoTs, true);
+            if (Directory.Exists(outAudioTs)) Directory.Delete(outAudioTs, true);
+
+            CopyDirectory(videoTsDir, outVideoTs);
+            Directory.CreateDirectory(outAudioTs); // standard empty folder
+
+            progress(new ConvertProgress { Stage = "Export", Percent = 85, Message = "DVD folder exported" });
+            _log.Add("Exported VIDEO_TS to: " + outVideoTs);
         }
 
-        if (req.Output.ExportFolder)
-        {
-            await dvdauthor.AuthorAsync(mpgPaths, dvdFolder, req.Dvd.ChaptersMode, req.Dvd.ChaptersEveryMinutes, ct);
-        }
-
-        onProgress(new ConvertProgress { Stage = "Author", Percent = 100, Message = "DVD folder ready" });
-
+        // 4) Create ISO (if enabled)
         if (req.Output.ExportIso)
         {
-            onProgress(new ConvertProgress { Stage = "Iso", Percent = 0, Message = "Building ISO" });
+            progress(new ConvertProgress { Stage = "ISO", Percent = 88, Message = "Creating ISO image" });
 
-            var isoPath = Path.Combine(req.Output.OutputPath, $"{req.Output.DiscLabel}.iso");
-            var dvdInputForIso = req.Output.ExportFolder ? dvdFolder : throw new InvalidOperationException("ISO requested but DVD folder export is off in v1.");
+            var isoName = req.Output.DiscLabel;
+            if (string.IsNullOrWhiteSpace(isoName)) isoName = "AVITODVD";
 
-            await xorriso.BuildIsoAsync(dvdInputForIso, isoPath, req.Output.DiscLabel, ct);
+            var isoPath = Path.Combine(req.Output.OutputPath, isoName + ".iso");
+            Directory.CreateDirectory(req.Output.OutputPath);
 
-            onProgress(new ConvertProgress { Stage = "Iso", Percent = 100, Message = "ISO ready" });
+            // IMPORTANT: mkisofs needs the DVD root folder which contains VIDEO_TS (and optionally AUDIO_TS)
+            if (!Directory.Exists(Path.Combine(dvdRoot, "AUDIO_TS")))
+                Directory.CreateDirectory(Path.Combine(dvdRoot, "AUDIO_TS"));
+
+            await IsoMaker.CreateIsoFromDvdFolderAsync(
+                mkisofsExe,
+                dvdRoot,
+                isoPath,
+                isoName,
+                _log,
+                ct).ConfigureAwait(false);
+
+            if (!File.Exists(isoPath))
+                throw new InvalidOperationException("ISO creation finished without producing an ISO file.");
+
+            progress(new ConvertProgress { Stage = "ISO", Percent = 98, Message = "ISO created" });
+            _log.Add("ISO created: " + isoPath);
         }
+
+        progress(new ConvertProgress { Stage = "Done", Percent = 100, Message = "Completed" });
+        _log.Add("Job completed.");
     }
 
-}
+    private static void ValidateRequest(ConvertJobRequest req)
+    {
+        if (req.Sources is null || req.Sources.Count == 0)
+            throw new InvalidOperationException("No sources selected.");
+
+        if (req.Preset is null)
+            throw new InvalidOperationException("No preset selected.");
+
+        if (req.Output is null)
+            throw new InvalidOperationException("No output settings.");
+
+        if (!req.Output.ExportFolder && !req.Output.ExportIso)
+            throw new InvalidOperationException("No output option selected.");
+
+        if (string.IsNullOrWhiteSpace(req.Output.OutputPath))
+            throw new InvalidOperationException("Output path is empty.");
+    }
+
+    private async Task EncodeToDvdMpegAsync(string ffmpegExe, string input, string outMpg, ConvertJobRequest req, CancellationToken ct)
+    {
+        var target = req.Dvd.Mode == DvdMode.NTSC ? "ntsc-dvd" : "pal-dvd";
+
+        string aspectArg = req.Dvd.Aspect switch
+        {
+            AspectMode.Anamorphic16x9 => "-aspect 16:9",
+            AspectMode.Standard4x3 => "-aspect 4:3",
+            _ => ""
+        };
+
+        // Audio: use preset audio bitrate when available
+        var audioKbps = req.Preset.Audio?.BitrateKbps > 0 ? req.Preset.Audio.BitrateKbps : 192;
+
+        // Video: if preset specifies target rate, use it; else let ffmpeg decide for target dvd profile
+        var videoRateArg = "";
+        if (req.Preset.Video?.TargetRateKbps is int vr && vr > 0)
+        {
+            videoRateArg = $"-b:v {vr}k -maxrate {Math.Max(vr, req.Preset.Video.MaxRateKbps)}k -bufsize {Math.Max(1, req.Preset.Video.BufSizeKbps)}k";
+        }
+
+        // Build args
+        var args = new StringBuilder();
+        args.Append("-y ");
+        args.Append("-i ").Append('"').Append(input).Append("\" ");
+        args.Append("-target ").Append(target).Append(' ');
+        if (!string.IsNullOrWhiteSpace(videoRateArg)) args.Append(videoRateArg).Append(' ');
+        if (!string.IsNullOrWhiteSpace(aspectArg)) args.Append(aspectArg).Append(' ');
+        args.Append("-c:a ac3 ").Append($"-b:a {audioKbps}k ").Append(' ');
+        args.Append("-ar 48000 ");
+        args.Append("-ac 2 ");
+        args.Append('"').Append(outMpg).Append('"');
+
+        await RunProcessAsync(ffmpegExe, args.ToString(), Path.GetDirectoryName(outMpg)!, ct).ConfigureAwait(false);
+
+        if (!File.Exists(outMpg))
+            throw new InvalidOperationException("ffmpeg finished without producing MPG: " + outMpg);
+    }
+
+    private string BuildDvdauthorXml(List<string> mpgFiles)
+    {
+        // Multiple titles: one PGC with multiple VOB entries is acceptable for basic playback
+        var sb = new StringBuilder();
+        sb.AppendLine("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
+        sb.AppendLine("<dvdauthor>");
+        sb.AppendLine("  <vmgm />");
+        sb.AppendLine("  <titleset>");
+        sb.AppendLine("    <titles>");
+        sb.AppendLine("      <pgc>");
+
+        foreach (var f in mpgFiles)
+        {
+            sb.Append("        <vob file=\"").Append(EscapeXml(f)).Append("\" />").AppendLine();
+        }
+
+        sb.AppendLine("      </pgc>");
+        sb.AppendLine("    </titles>");
+        sb.AppendLine("  </titleset
