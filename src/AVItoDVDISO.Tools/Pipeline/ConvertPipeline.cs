@@ -1,365 +1,420 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using AVItoDVDISO.Core.Models;
 
-namespace AVItoDVDISO.Tools
+namespace AVItoDVDISO.Tools;
+
+public sealed class ConvertPipeline
 {
-    internal sealed class ConvertPipeline
+    private readonly LogBuffer _log;
+
+    public ConvertPipeline(LogBuffer log)
     {
-        public sealed class Settings
+        _log = log ?? throw new ArgumentNullException(nameof(log));
+    }
+
+    public async Task RunAsync(ConvertJobRequest req, Action<ConvertProgress> progress, CancellationToken ct)
+    {
+        if (req is null) throw new ArgumentNullException(nameof(req));
+        if (progress is null) throw new ArgumentNullException(nameof(progress));
+        ct.ThrowIfCancellationRequested();
+
+        if (req.Sources is null || req.Sources.Count == 0)
+            throw new InvalidOperationException("No sources provided.");
+
+        if (req.Output is null)
+            throw new InvalidOperationException("Output settings are missing.");
+
+        if (req.Dvd is null)
+            throw new InvalidOperationException("DVD settings are missing.");
+
+        if (string.IsNullOrWhiteSpace(req.WorkingDir))
+            throw new InvalidOperationException("WorkingDir is missing.");
+
+        if (string.IsNullOrWhiteSpace(req.ToolsDir))
+            throw new InvalidOperationException("ToolsDir is missing.");
+
+        Directory.CreateDirectory(req.WorkingDir);
+
+        var jobDir = Path.Combine(req.WorkingDir, $"job_{DateTime.Now:yyyyMMdd_HHmmss}");
+        Directory.CreateDirectory(jobDir);
+
+        var dvdRoot = Path.Combine(jobDir, "dvdroot");
+        var videoTsDir = Path.Combine(dvdRoot, "VIDEO_TS");
+        Directory.CreateDirectory(videoTsDir);
+
+        var assetsDir = Path.Combine(jobDir, "assets");
+        Directory.CreateDirectory(assetsDir);
+
+        var transcodeDir = Path.Combine(jobDir, "transcoded");
+        Directory.CreateDirectory(transcodeDir);
+
+        Report(progress, 1, "Init", $"Working directory: {jobDir}");
+        Report(progress, 2, "Init", $"DVD root: {dvdRoot}");
+
+        var ffmpegExe = Path.Combine(req.ToolsDir, "ffmpeg.exe");
+        var ffprobeExe = Path.Combine(req.ToolsDir, "ffprobe.exe");
+        var dvdauthorExe = Path.Combine(req.ToolsDir, "dvdauthor.exe");
+        var imgBurnExe = ResolveImgBurnPath(req.ToolsDir);
+
+        if (!File.Exists(ffmpegExe))
+            throw new FileNotFoundException("ffmpeg.exe not found in tools folder.", ffmpegExe);
+
+        if (!File.Exists(dvdauthorExe))
+            throw new FileNotFoundException("dvdauthor.exe not found in tools folder.", dvdauthorExe);
+
+        if (req.Output.ExportIso && string.IsNullOrWhiteSpace(imgBurnExe))
+            throw new FileNotFoundException("ImgBurn.exe not found in tools folder. ISO export is enabled, but ImgBurn is missing.");
+
+        var titleMpgs = new List<string>();
+        for (int i = 0; i < req.Sources.Count; i++)
         {
-            // Input
-            public string InputVideoPath { get; set; } = "";
+            ct.ThrowIfCancellationRequested();
 
-            // Output
-            public string OutputFolder { get; set; } = "";
-            public string OutputBaseName { get; set; } = "AVITODVD";
-            public bool ExportVideoTsFolder { get; set; } = true;
-            public bool CreateIsoImage { get; set; } = true;
+            var src = req.Sources[i];
+            if (src is null || string.IsNullOrWhiteSpace(src.Path) || !File.Exists(src.Path))
+                throw new FileNotFoundException("Source file not found.", src?.Path ?? "(null)");
 
-            // Volume label (ISO)
-            public string VolumeLabel { get; set; } = "AVITODVD";
+            var inPath = src.Path;
+            var outMpg = Path.Combine(transcodeDir, $"title_{i + 1:00}.mpg");
 
-            // Tools
-            public string ToolsFolder { get; set; } = "";
-            public string DvdAuthorExeName { get; set; } = "dvdauthor.exe";
-            public string MkisofsExeName { get; set; } = "mkisofs.exe"; // kept only for legacy compatibility, not used when CreateIsoImage uses ImgBurn
-            public string ImgBurnExeName { get; set; } = "ImgBurn.exe";
+            Report(progress, Percent(3, 55, i, req.Sources.Count), "Transcode", $"Transcoding: {Path.GetFileName(inPath)}");
 
-            // Working folder
-            public string WorkRootFolder { get; set; } = ""; // if empty, uses %LOCALAPPDATA%\Temp\AVItoDVDISO\<jobId>\
+            var ffArgs = BuildFfmpegArgs(inPath, outMpg, req.Dvd, req.Preset);
+            await ExecAsync(ffmpegExe, ffArgs, jobDir, progress, "ffmpeg", ct).ConfigureAwait(false);
 
-            // Optional: dvd folder name inside work root
-            public string DvdRootFolderName { get; set; } = "dvdroot";
+            if (!File.Exists(outMpg) || new FileInfo(outMpg).Length == 0)
+                throw new InvalidOperationException($"Transcode produced no output: {outMpg}");
 
-            // Optional: dvd title set name
-            public string DvdTitle { get; set; } = "DVD";
+            titleMpgs.Add(outMpg);
         }
 
-        public sealed class Result
+        ct.ThrowIfCancellationRequested();
+
+        Report(progress, 56, "Author", "Creating dvdauthor XML");
+        var xmlPath = Path.Combine(assetsDir, "dvdauthor.xml");
+        File.WriteAllText(xmlPath, BuildDvdauthorXml(titleMpgs, req.Dvd), Encoding.UTF8);
+
+        Report(progress, 60, "Author", "Running dvdauthor (DVD-Video authoring)");
+        var dvdAuthorArgs = $"-x \"{xmlPath}\"";
+        await ExecAsync(dvdauthorExe, dvdAuthorArgs, dvdRoot, progress, "dvdauthor", ct).ConfigureAwait(false);
+
+        if (!Directory.Exists(videoTsDir))
+            throw new InvalidOperationException("dvdauthor did not create VIDEO_TS folder.");
+
+        var ifoCount = Directory.EnumerateFiles(videoTsDir, "*.IFO", SearchOption.TopDirectoryOnly).Count();
+        var vobCount = Directory.EnumerateFiles(videoTsDir, "*.VOB", SearchOption.TopDirectoryOnly).Count();
+        if (ifoCount == 0 || vobCount == 0)
+            throw new InvalidOperationException("DVD authoring finished, but VIDEO_TS appears incomplete (missing IFO/VOB).");
+
+        Report(progress, 70, "Author", $"DVD structure ready: IFO={ifoCount}, VOB={vobCount}");
+
+        if (req.Output.ExportFolder)
         {
-            public bool Success { get; set; }
-            public string JobFolder { get; set; } = "";
-            public string DvdRootFolder { get; set; } = "";
-            public string VideoTsFolder { get; set; } = "";
-            public string? ExportedVideoTsFolder { get; set; }
-            public string? IsoPath { get; set; }
-            public string? ErrorMessage { get; set; }
+            ct.ThrowIfCancellationRequested();
+
+            var targetVideoTs = Path.Combine(req.Output.OutputPath ?? "", "VIDEO_TS");
+            if (string.IsNullOrWhiteSpace(req.Output.OutputPath))
+                throw new InvalidOperationException("OutputPath is empty while ExportFolder is enabled.");
+
+            Directory.CreateDirectory(req.Output.OutputPath);
+
+            Report(progress, 75, "Export", $"Exporting VIDEO_TS to: {targetVideoTs}");
+            if (Directory.Exists(targetVideoTs))
+                Directory.Delete(targetVideoTs, true);
+
+            CopyDirectory(videoTsDir, targetVideoTs);
+            Report(progress, 80, "Export", "VIDEO_TS exported");
         }
 
-        private readonly Action<string> _log;
-
-        public ConvertPipeline(Action<string> log)
+        if (req.Output.ExportIso)
         {
-            _log = log ?? throw new ArgumentNullException(nameof(log));
+            ct.ThrowIfCancellationRequested();
+
+            var outIso = Path.Combine(req.Output.OutputPath ?? "", $"{req.Output.DiscLabel ?? "AVITODVD"}.iso");
+            Directory.CreateDirectory(req.Output.OutputPath ?? "");
+
+            Report(progress, 85, "ISO", $"Creating ISO via ImgBurn: {Path.GetFileName(outIso)}");
+            await CreateIsoWithImgBurnAsync(
+                imgBurnExe!,
+                dvdRoot,
+                outIso,
+                req.Output.DiscLabel ?? "AVITODVD",
+                progress,
+                ct
+            ).ConfigureAwait(false);
+
+            if (!File.Exists(outIso) || new FileInfo(outIso).Length == 0)
+                throw new InvalidOperationException($"ISO creation produced no output: {outIso}");
+
+            Report(progress, 99, "ISO", "ISO created");
         }
 
-        public Result Run(Settings settings)
+        Report(progress, 100, "Done", "Conversion finished");
+    }
+
+    private static int Percent(int start, int end, int index, int total)
+    {
+        if (total <= 0) return start;
+        if (index < 0) index = 0;
+        if (index > total) index = total;
+        var span = end - start;
+        var p = start + (int)Math.Round(span * (index / (double)total), MidpointRounding.AwayFromZero);
+        return Math.Clamp(p, start, end);
+    }
+
+    private void Report(Action<ConvertProgress> progress, int percent, string stage, string message)
+    {
+        var p = new ConvertProgress
         {
-            if (settings == null) throw new ArgumentNullException(nameof(settings));
+            Percent = Math.Clamp(percent, 0, 100),
+            Stage = stage ?? "",
+            Message = message ?? ""
+        };
 
-            var res = new Result();
+        _log.AddLine($"{stage}: {message}");
+        progress(p);
+    }
 
-            try
+    private async Task ExecAsync(
+        string exe,
+        string args,
+        string workingDir,
+        Action<ConvertProgress> progress,
+        string label,
+        CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        _log.AddLine($"{label}: {exe} {args}");
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = exe,
+            Arguments = args,
+            WorkingDirectory = workingDir,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+
+        using var p = System.Diagnostics.Process.Start(psi);
+        if (p is null)
+            throw new InvalidOperationException($"Failed to start process: {exe}");
+
+        var stdoutTask = ReadLinesAsync(p.StandardOutput, line => _log.AddLine(line), ct);
+        var stderrTask = ReadLinesAsync(p.StandardError, line => _log.AddLine(line), ct);
+
+        await Task.WhenAll(stdoutTask, stderrTask).ConfigureAwait(false);
+        await p.WaitForExitAsync(ct).ConfigureAwait(false);
+
+        if (p.ExitCode != 0)
+            throw new InvalidOperationException($"{label} failed with exit code {p.ExitCode}.");
+    }
+
+    private static async Task ReadLinesAsync(StreamReader reader, Action<string> onLine, CancellationToken ct)
+    {
+        while (!reader.EndOfStream)
+        {
+            ct.ThrowIfCancellationRequested();
+            var line = await reader.ReadLineAsync().ConfigureAwait(false);
+            if (line is null) break;
+            if (line.Length > 0) onLine(line);
+        }
+    }
+
+    private static string BuildFfmpegArgs(string input, string outputMpg, DvdSettings dvd, PresetDefinition? preset)
+    {
+        var isNtsc = dvd.Mode == DvdMode.NTSC;
+        var fps = isNtsc ? "30000/1001" : "25";
+        var size = isNtsc ? "720x480" : "720x576";
+
+        var aspectFlag = dvd.Aspect switch
+        {
+            AspectMode.Anamorphic16x9 => "16:9",
+            AspectMode.Standard4x3 => "4:3",
+            _ => "16:9"
+        };
+
+        var vBitrateK = GetPresetInt(preset, "video_bitrate_k", isNtsc ? 5500 : 6000);
+        var aBitrateK = GetPresetInt(preset, "audio_bitrate_k", 192);
+        var audioRate = GetPresetInt(preset, "audio_sample_rate_hz", 48000);
+
+        var sb = new StringBuilder();
+        sb.Append("-y ");
+        sb.Append($"-i \"{input}\" ");
+        sb.Append("-vf ");
+        sb.Append($"\"scale={size}:flags=lanczos,setsar=1,setdar={aspectFlag}\" ");
+        sb.Append($"-r {fps} ");
+        sb.Append("-c:v mpeg2video ");
+        sb.Append($"-b:v {vBitrateK}k ");
+        sb.Append("-maxrate 9000k -bufsize 1835k ");
+        sb.Append("-pix_fmt yuv420p ");
+        sb.Append("-g 15 -bf 2 ");
+        sb.Append("-c:a ac3 ");
+        sb.Append($"-b:a {aBitrateK}k ");
+        sb.Append($"-ar {audioRate} ");
+        sb.Append("-ac 2 ");
+        sb.Append("-muxrate 10080000 ");
+        sb.Append("-packetsize 2048 ");
+        sb.Append($"\"{outputMpg}\"");
+
+        return sb.ToString();
+    }
+
+    private static int GetPresetInt(PresetDefinition? preset, string key, int fallback)
+    {
+        try
+        {
+            if (preset is null) return fallback;
+
+            var prop = preset.GetType().GetProperty("Params");
+            if (prop?.GetValue(preset) is IDictionary<string, string> dict &&
+                dict.TryGetValue(key, out var s) &&
+                int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v))
             {
-                ValidateSettings(settings);
-
-                var jobId = "job_" + DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
-                var jobFolder = ResolveJobFolder(settings, jobId);
-                Directory.CreateDirectory(jobFolder);
-
-                res.JobFolder = jobFolder;
-
-                var dvdRoot = Path.Combine(jobFolder, settings.DvdRootFolderName);
-                Directory.CreateDirectory(dvdRoot);
-
-                res.DvdRootFolder = dvdRoot;
-
-                var videoTs = Path.Combine(dvdRoot, "VIDEO_TS");
-                Directory.CreateDirectory(videoTs);
-
-                res.VideoTsFolder = videoTs;
-
-                _log($"JOB: {jobId}");
-                _log($"Input: {settings.InputVideoPath}");
-                _log($"Work: {jobFolder}");
-                _log($"DVD root: {dvdRoot}");
-                _log($"Output folder: {settings.OutputFolder}");
-                _log($"Create ISO: {settings.CreateIsoImage}");
-                _log($"Export VIDEO_TS: {settings.ExportVideoTsFolder}");
-
-                // =========================================================================
-                // STEP A: Create VIDEO_TS (DVD-Video structure)
-                // =========================================================================
-                // This pipeline expects that a valid VIDEO_TS is created under dvdRoot.
-                // If you already generate VIDEO_TS elsewhere, keep that code and remove
-                // the placeholder below. The log you pasted shows dvdauthor already runs.
-                //
-                // Here we include a "dvdauthor" call pattern that is typical:
-                //   1) dvdauthor -o <dvdRoot> -t <mpegFile>
-                //   2) dvdauthor -o <dvdRoot> -T
-                //
-                // NOTE: You must provide an MPEG2 file compatible with DVD-Video.
-                // If your app creates that earlier, set mpegPath to it.
-                // =========================================================================
-
-                // Placeholder path for MPEG2 source created earlier in your process
-                // If your project already has a known location, replace this with that variable.
-                var mpegPath = Path.Combine(jobFolder, "dvd.mpg");
-                if (!File.Exists(mpegPath))
-                {
-                    // If your pipeline generates VIDEO_TS elsewhere, you can remove this check.
-                    // For safety, we stop here because dvdauthor needs a valid MPEG input.
-                    throw new FileNotFoundException(
-                        "Expected MPEG2 file not found. Ensure your pipeline creates a DVD-compatible MPEG2 file at: " + mpegPath,
-                        mpegPath);
-                }
-
-                var dvdauthorExe = ResolveTool(settings.ToolsFolder, settings.DvdAuthorExeName);
-                RunProcess(
-                    dvdauthorExe,
-                    $"-o {Quote(dvdRoot)} -t {Quote(mpegPath)}",
-                    workingDir: jobFolder,
-                    logPrefix: "dvdauthor",
-                    throwOnNonZeroExit: true);
-
-                RunProcess(
-                    dvdauthorExe,
-                    $"-o {Quote(dvdRoot)} -T",
-                    workingDir: jobFolder,
-                    logPrefix: "dvdauthor",
-                    throwOnNonZeroExit: true);
-
-                // Verify VIDEO_TS looks populated
-                EnsureVideoTsLooksValid(videoTs);
-
-                // =========================================================================
-                // STEP B: Export VIDEO_TS folder to output (optional)
-                // =========================================================================
-                if (settings.ExportVideoTsFolder)
-                {
-                    var exportVideoTs = Path.Combine(settings.OutputFolder, "VIDEO_TS");
-                    Directory.CreateDirectory(settings.OutputFolder);
-
-                    _log($"Exported VIDEO_TS to: {exportVideoTs}");
-                    CopyDirectory(videoTs, exportVideoTs, overwrite: true);
-
-                    res.ExportedVideoTsFolder = exportVideoTs;
-                }
-
-                // =========================================================================
-                // STEP C: Create ISO (ImgBurn only)
-                // =========================================================================
-                if (settings.CreateIsoImage)
-                {
-                    Directory.CreateDirectory(settings.OutputFolder);
-
-                    var isoPath = Path.Combine(settings.OutputFolder, settings.OutputBaseName + ".iso");
-                    if (File.Exists(isoPath))
-                    {
-                        try
-                        {
-                            File.Delete(isoPath);
-                        }
-                        catch
-                        {
-                            // If delete fails, pick a new name
-                            isoPath = Path.Combine(settings.OutputFolder, settings.OutputBaseName + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture) + ".iso");
-                        }
-                    }
-
-                    // Prefer tools folder ImgBurn.exe, otherwise standard install location
-                    var imgBurnPath = ResolveImgBurn(settings.ToolsFolder, settings.ImgBurnExeName);
-
-                    var exit = IsoMaker.CreateIsoWithImgBurn(
-                        imgBurnExePath: imgBurnPath,
-                        dvdRootFolder: dvdRoot,
-                        isoOutputPath: isoPath,
-                        volumeLabel: settings.VolumeLabel,
-                        log: _log,
-                        throwOnError: true
-                    );
-
-                    _log($"ISO exit code: {exit}");
-                    res.IsoPath = isoPath;
-                }
-
-                res.Success = true;
-                return res;
-            }
-            catch (Exception ex)
-            {
-                res.Success = false;
-                res.ErrorMessage = ex.ToString();
-                _log("ERROR: " + ex.Message);
-                _log(ex.ToString());
-                return res;
-            }
-        }
-
-        private static void ValidateSettings(Settings s)
-        {
-            if (string.IsNullOrWhiteSpace(s.InputVideoPath))
-                throw new ArgumentException("InputVideoPath is empty.", nameof(s));
-
-            if (!File.Exists(s.InputVideoPath))
-                throw new FileNotFoundException("Input video not found.", s.InputVideoPath);
-
-            if (string.IsNullOrWhiteSpace(s.OutputFolder))
-                throw new ArgumentException("OutputFolder is empty.", nameof(s));
-
-            if (string.IsNullOrWhiteSpace(s.ToolsFolder))
-                throw new ArgumentException("ToolsFolder is empty.", nameof(s));
-
-            if (!Directory.Exists(s.ToolsFolder))
-                throw new DirectoryNotFoundException("ToolsFolder not found: " + s.ToolsFolder);
-
-            if (string.IsNullOrWhiteSpace(s.OutputBaseName))
-                s.OutputBaseName = "AVITODVD";
-
-            if (string.IsNullOrWhiteSpace(s.VolumeLabel))
-                s.VolumeLabel = "AVITODVD";
-
-            if (string.IsNullOrWhiteSpace(s.DvdRootFolderName))
-                s.DvdRootFolderName = "dvdroot";
-        }
-
-        private static string ResolveJobFolder(Settings s, string jobId)
-        {
-            if (!string.IsNullOrWhiteSpace(s.WorkRootFolder))
-                return Path.Combine(s.WorkRootFolder, jobId);
-
-            var baseTemp = Path.GetTempPath();
-            return Path.Combine(baseTemp, "AVItoDVDISO", jobId);
-        }
-
-        private static string ResolveTool(string toolsFolder, string exeName)
-        {
-            var p = Path.Combine(toolsFolder, exeName);
-            if (!File.Exists(p))
-                throw new FileNotFoundException("Tool not found: " + p, p);
-            return p;
-        }
-
-        private static string ResolveImgBurn(string toolsFolder, string exeName)
-        {
-            // 1) local tools folder (preferred)
-            var local = Path.Combine(toolsFolder, exeName);
-            if (File.Exists(local))
-                return local;
-
-            // 2) standard installs
-            var pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
-            var pfX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
-
-            var c1 = Path.Combine(pfX86, "ImgBurn", "ImgBurn.exe");
-            if (File.Exists(c1)) return c1;
-
-            var c2 = Path.Combine(pf, "ImgBurn", "ImgBurn.exe");
-            if (File.Exists(c2)) return c2;
-
-            throw new FileNotFoundException("ImgBurn.exe not found. Place ImgBurn.exe in tools folder or install ImgBurn.");
-        }
-
-        private void RunProcess(
-            string exePath,
-            string arguments,
-            string workingDir,
-            string logPrefix,
-            bool throwOnNonZeroExit)
-        {
-            _log($"{logPrefix}: {exePath} {arguments}");
-
-            var psi = new ProcessStartInfo
-            {
-                FileName = exePath,
-                Arguments = arguments,
-                WorkingDirectory = workingDir,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            };
-
-            using var p = new Process { StartInfo = psi };
-
-            var stdout = new StringBuilder();
-            var stderr = new StringBuilder();
-
-            p.OutputDataReceived += (_, e) =>
-            {
-                if (e.Data == null) return;
-                stdout.AppendLine(e.Data);
-                _log($"{logPrefix}: {e.Data}");
-            };
-
-            p.ErrorDataReceived += (_, e) =>
-            {
-                if (e.Data == null) return;
-                stderr.AppendLine(e.Data);
-                _log($"{logPrefix} ERR: {e.Data}");
-            };
-
-            if (!p.Start())
-                throw new InvalidOperationException("Failed to start process: " + exePath);
-
-            p.BeginOutputReadLine();
-            p.BeginErrorReadLine();
-
-            p.WaitForExit();
-
-            var exit = p.ExitCode;
-            _log($"{logPrefix} exit code: {exit}");
-
-            if (throwOnNonZeroExit && exit != 0)
-            {
-                throw new InvalidOperationException(
-                    $"{logPrefix} failed.\nExit code: {exit}\nCommand: {exePath} {arguments}\nOutput:\n{stdout}\nError:\n{stderr}");
+                return v;
             }
         }
-
-        private static void EnsureVideoTsLooksValid(string videoTsFolder)
+        catch
         {
-            if (!Directory.Exists(videoTsFolder))
-                throw new DirectoryNotFoundException("VIDEO_TS not found: " + videoTsFolder);
+        }
+        return fallback;
+    }
 
-            var ifoFiles = Directory.GetFiles(videoTsFolder, "*.IFO", SearchOption.TopDirectoryOnly);
-            var vobFiles = Directory.GetFiles(videoTsFolder, "*.VOB", SearchOption.TopDirectoryOnly);
+    private static string BuildDvdauthorXml(IReadOnlyList<string> titleMpgs, DvdSettings dvd)
+    {
+        var dvdOut = Path.Combine(".");
 
-            if (ifoFiles.Length == 0 || vobFiles.Length == 0)
+        var formatAttr = dvd.Mode == DvdMode.NTSC ? "ntsc" : "pal";
+
+        var aspectAttr = dvd.Aspect switch
+        {
+            AspectMode.Standard4x3 => "4:3",
+            AspectMode.Anamorphic16x9 => "16:9",
+            _ => "16:9"
+        };
+
+        var sb = new StringBuilder();
+        sb.AppendLine("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
+        sb.AppendLine($"<dvdauthor dest=\"{dvdOut}\">");
+        sb.AppendLine("  <vmgm />");
+        sb.AppendLine("  <titleset>");
+        sb.AppendLine("    <titles>");
+
+        foreach (var mpg in titleMpgs)
+        {
+            var fileName = Path.GetFileName(mpg);
+            sb.AppendLine($"      <pgc>");
+            sb.AppendLine($"        <vob file=\"{Path.Combine("..", "transcoded", fileName)}\" />");
+            sb.AppendLine($"      </pgc>");
+        }
+
+        sb.AppendLine("    </titles>");
+        sb.AppendLine("  </titleset>");
+        sb.AppendLine("</dvdauthor>");
+
+        var xml = sb.ToString();
+
+        xml = xml.Replace("<titles>", $"<titles format=\"{formatAttr}\" aspect=\"{aspectAttr}\">", StringComparison.OrdinalIgnoreCase);
+
+        return xml;
+    }
+
+    private async Task CreateIsoWithImgBurnAsync(
+        string imgBurnExe,
+        string dvdRoot,
+        string outIso,
+        string discLabel,
+        Action<ConvertProgress> progress,
+        CancellationToken ct)
+    {
+        if (!File.Exists(imgBurnExe))
+            throw new FileNotFoundException("ImgBurn.exe not found.", imgBurnExe);
+
+        Directory.CreateDirectory(Path.GetDirectoryName(outIso) ?? ".");
+
+        if (File.Exists(outIso))
+            File.Delete(outIso);
+
+        var label = SanitizeLabelForImgBurn(discLabel);
+
+        var args =
+            "/MODE BUILD " +
+            "/BUILDMODE IMAGEFILE " +
+            "/BUILDOUTPUTMODE IMAGEFILE " +
+            "/FILESYSTEM \"ISO9660 + UDF\" " +
+            "/UDFREVISION 1.02 " +
+            "/VOLUMELABEL \"" + label + "\" " +
+            "/SRC \"" + dvdRoot + "\" " +
+            "/DEST \"" + outIso + "\" " +
+            "/START " +
+            "/CLOSE";
+
+        Report(progress, 90, "ISO", "Starting ImgBurn");
+        await ExecAsync(imgBurnExe, args, Path.GetDirectoryName(imgBurnExe) ?? Environment.CurrentDirectory, progress, "ImgBurn", ct).ConfigureAwait(false);
+        Report(progress, 98, "ISO", "ImgBurn finished");
+    }
+
+    private static string SanitizeLabelForImgBurn(string label)
+    {
+        var s = (label ?? "AVITODVD").Trim();
+        if (s.Length == 0) s = "AVITODVD";
+        if (s.Length > 32) s = s.Substring(0, 32);
+
+        var sb = new StringBuilder();
+        foreach (var ch in s)
+        {
+            if ((ch >= 'A' && ch <= 'Z') ||
+                (ch >= 'a' && ch <= 'z') ||
+                (ch >= '0' && ch <= '9') ||
+                ch == '_' || ch == '-')
             {
-                throw new InvalidOperationException(
-                    "VIDEO_TS folder does not look like a valid DVD-Video structure. Missing IFO and/or VOB files: " + videoTsFolder);
+                sb.Append(ch);
             }
         }
 
-        private static void CopyDirectory(string sourceDir, string targetDir, bool overwrite)
+        var clean = sb.ToString().ToUpperInvariant();
+        if (clean.Length == 0) clean = "AVITODVD";
+        return clean;
+    }
+
+    private static string? ResolveImgBurnPath(string toolsDir)
+    {
+        var direct = Path.Combine(toolsDir, "ImgBurn.exe");
+        if (File.Exists(direct)) return direct;
+
+        var toolsSub = Path.Combine(toolsDir, "ImgBurn", "ImgBurn.exe");
+        if (File.Exists(toolsSub)) return toolsSub;
+
+        var binSub = Path.Combine(toolsDir, "bin", "ImgBurn.exe");
+        if (File.Exists(binSub)) return binSub;
+
+        return null;
+    }
+
+    private static void CopyDirectory(string sourceDir, string destDir)
+    {
+        Directory.CreateDirectory(destDir);
+
+        foreach (var file in Directory.EnumerateFiles(sourceDir, "*", SearchOption.TopDirectoryOnly))
         {
-            Directory.CreateDirectory(targetDir);
-
-            foreach (var file in Directory.GetFiles(sourceDir, "*", SearchOption.TopDirectoryOnly))
-            {
-                var name = Path.GetFileName(file);
-                var dest = Path.Combine(targetDir, name);
-                File.Copy(file, dest, overwrite);
-            }
-
-            foreach (var dir in Directory.GetDirectories(sourceDir, "*", SearchOption.TopDirectoryOnly))
-            {
-                var name = Path.GetFileName(dir);
-                var dest = Path.Combine(targetDir, name);
-                CopyDirectory(dir, dest, overwrite);
-            }
+            var dest = Path.Combine(destDir, Path.GetFileName(file));
+            File.Copy(file, dest, true);
         }
 
-        private static string Quote(string s)
+        foreach (var dir in Directory.EnumerateDirectories(sourceDir, "*", SearchOption.TopDirectoryOnly))
         {
-            if (s.Contains("\"", StringComparison.Ordinal))
-                s = s.Replace("\"", "\\\"", StringComparison.Ordinal);
-            return "\"" + s + "\"";
+            var dest = Path.Combine(destDir, Path.GetFileName(dir));
+            CopyDirectory(dir, dest);
         }
     }
 }
-
