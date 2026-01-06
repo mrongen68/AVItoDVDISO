@@ -50,7 +50,7 @@ public static class IsoMaker
             CreateNoWindow = true
         };
 
-        using var p = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start mkisofs.");
+        using var p = System.Diagnostics.Process.Start(psi) ?? throw new InvalidOperationException("Failed to start mkisofs.");
 
         var stdoutTask = p.StandardOutput.ReadToEndAsync();
         var stderrTask = p.StandardError.ReadToEndAsync();
