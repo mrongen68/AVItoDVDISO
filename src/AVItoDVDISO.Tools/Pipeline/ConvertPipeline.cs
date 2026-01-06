@@ -60,7 +60,6 @@ public sealed class ConvertPipeline
         Report(progress, 2, "Init", $"DVD root: {dvdRoot}");
 
         var ffmpegExe = Path.Combine(req.ToolsDir, "ffmpeg.exe");
-        var ffprobeExe = Path.Combine(req.ToolsDir, "ffprobe.exe");
         var dvdauthorExe = Path.Combine(req.ToolsDir, "dvdauthor.exe");
         var imgBurnExe = ResolveImgBurnPath(req.ToolsDir);
 
@@ -74,6 +73,7 @@ public sealed class ConvertPipeline
             throw new FileNotFoundException("ImgBurn.exe not found in tools folder. ISO export is enabled, but ImgBurn is missing.");
 
         var titleMpgs = new List<string>();
+
         for (int i = 0; i < req.Sources.Count; i++)
         {
             ct.ThrowIfCancellationRequested();
@@ -88,7 +88,7 @@ public sealed class ConvertPipeline
             Report(progress, Percent(3, 55, i, req.Sources.Count), "Transcode", $"Transcoding: {Path.GetFileName(inPath)}");
 
             var ffArgs = BuildFfmpegArgs(inPath, outMpg, req.Dvd, req.Preset);
-            await ExecAsync(ffmpegExe, ffArgs, jobDir, progress, "ffmpeg", ct).ConfigureAwait(false);
+            await ExecAsync(ffmpegExe, ffArgs, jobDir, "ffmpeg", ct).ConfigureAwait(false);
 
             if (!File.Exists(outMpg) || new FileInfo(outMpg).Length == 0)
                 throw new InvalidOperationException($"Transcode produced no output: {outMpg}");
@@ -104,7 +104,7 @@ public sealed class ConvertPipeline
 
         Report(progress, 60, "Author", "Running dvdauthor (DVD-Video authoring)");
         var dvdAuthorArgs = $"-x \"{xmlPath}\"";
-        await ExecAsync(dvdauthorExe, dvdAuthorArgs, dvdRoot, progress, "dvdauthor", ct).ConfigureAwait(false);
+        await ExecAsync(dvdauthorExe, dvdAuthorArgs, dvdRoot, "dvdauthor", ct).ConfigureAwait(false);
 
         if (!Directory.Exists(videoTsDir))
             throw new InvalidOperationException("dvdauthor did not create VIDEO_TS folder.");
@@ -120,13 +120,14 @@ public sealed class ConvertPipeline
         {
             ct.ThrowIfCancellationRequested();
 
-            var targetVideoTs = Path.Combine(req.Output.OutputPath ?? "", "VIDEO_TS");
             if (string.IsNullOrWhiteSpace(req.Output.OutputPath))
                 throw new InvalidOperationException("OutputPath is empty while ExportFolder is enabled.");
 
+            var targetVideoTs = Path.Combine(req.Output.OutputPath, "VIDEO_TS");
             Directory.CreateDirectory(req.Output.OutputPath);
 
             Report(progress, 75, "Export", $"Exporting VIDEO_TS to: {targetVideoTs}");
+
             if (Directory.Exists(targetVideoTs))
                 Directory.Delete(targetVideoTs, true);
 
@@ -138,16 +139,20 @@ public sealed class ConvertPipeline
         {
             ct.ThrowIfCancellationRequested();
 
-            var outIso = Path.Combine(req.Output.OutputPath ?? "", $"{req.Output.DiscLabel ?? "AVITODVD"}.iso");
-            Directory.CreateDirectory(req.Output.OutputPath ?? "");
+            if (string.IsNullOrWhiteSpace(req.Output.OutputPath))
+                throw new InvalidOperationException("OutputPath is empty while ExportIso is enabled.");
+
+            var label = SanitizeDiscLabel(req.Output.DiscLabel);
+            var outIso = Path.Combine(req.Output.OutputPath, $"{label}.iso");
+            Directory.CreateDirectory(req.Output.OutputPath);
 
             Report(progress, 85, "ISO", $"Creating ISO via ImgBurn: {Path.GetFileName(outIso)}");
+
             await CreateIsoWithImgBurnAsync(
                 imgBurnExe!,
                 dvdRoot,
                 outIso,
-                req.Output.DiscLabel ?? "AVITODVD",
-                progress,
+                label,
                 ct
             ).ConfigureAwait(false);
 
@@ -160,16 +165,6 @@ public sealed class ConvertPipeline
         Report(progress, 100, "Done", "Conversion finished");
     }
 
-    private static int Percent(int start, int end, int index, int total)
-    {
-        if (total <= 0) return start;
-        if (index < 0) index = 0;
-        if (index > total) index = total;
-        var span = end - start;
-        var p = start + (int)Math.Round(span * (index / (double)total), MidpointRounding.AwayFromZero);
-        return Math.Clamp(p, start, end);
-    }
-
     private void Report(Action<ConvertProgress> progress, int percent, string stage, string message)
     {
         var p = new ConvertProgress
@@ -179,17 +174,22 @@ public sealed class ConvertPipeline
             Message = message ?? ""
         };
 
-        _log.AddLine($"{stage}: {message}");
+        _log.AddLine($"{p.Stage}: {p.Message}");
         progress(p);
     }
 
-    private async Task ExecAsync(
-        string exe,
-        string args,
-        string workingDir,
-        Action<ConvertProgress> progress,
-        string label,
-        CancellationToken ct)
+    private static int Percent(int start, int end, int index, int total)
+    {
+        if (total <= 0) return start;
+        if (index < 0) index = 0;
+        if (index > total) index = total;
+
+        var span = end - start;
+        var p = start + (int)Math.Round(span * (index / (double)total), MidpointRounding.AwayFromZero);
+        return Math.Clamp(p, start, end);
+    }
+
+    private async Task ExecAsync(string exe, string args, string workingDir, string label, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
 
@@ -292,10 +292,7 @@ public sealed class ConvertPipeline
 
     private static string BuildDvdauthorXml(IReadOnlyList<string> titleMpgs, DvdSettings dvd)
     {
-        var dvdOut = Path.Combine(".");
-
         var formatAttr = dvd.Mode == DvdMode.NTSC ? "ntsc" : "pal";
-
         var aspectAttr = dvd.Aspect switch
         {
             AspectMode.Standard4x3 => "4:3",
@@ -305,47 +302,33 @@ public sealed class ConvertPipeline
 
         var sb = new StringBuilder();
         sb.AppendLine("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
-        sb.AppendLine($"<dvdauthor dest=\"{dvdOut}\">");
+        sb.AppendLine("<dvdauthor dest=\".\">");
         sb.AppendLine("  <vmgm />");
         sb.AppendLine("  <titleset>");
-        sb.AppendLine("    <titles>");
+        sb.AppendLine($"    <titles format=\"{formatAttr}\" aspect=\"{aspectAttr}\">");
 
         foreach (var mpg in titleMpgs)
         {
             var fileName = Path.GetFileName(mpg);
-            sb.AppendLine($"      <pgc>");
+            sb.AppendLine("      <pgc>");
             sb.AppendLine($"        <vob file=\"{Path.Combine("..", "transcoded", fileName)}\" />");
-            sb.AppendLine($"      </pgc>");
+            sb.AppendLine("      </pgc>");
         }
 
         sb.AppendLine("    </titles>");
         sb.AppendLine("  </titleset>");
         sb.AppendLine("</dvdauthor>");
 
-        var xml = sb.ToString();
-
-        xml = xml.Replace("<titles>", $"<titles format=\"{formatAttr}\" aspect=\"{aspectAttr}\">", StringComparison.OrdinalIgnoreCase);
-
-        return xml;
+        return sb.ToString();
     }
 
-    private async Task CreateIsoWithImgBurnAsync(
-        string imgBurnExe,
-        string dvdRoot,
-        string outIso,
-        string discLabel,
-        Action<ConvertProgress> progress,
-        CancellationToken ct)
+    private async Task CreateIsoWithImgBurnAsync(string imgBurnExe, string dvdRoot, string outIso, string discLabel, CancellationToken ct)
     {
         if (!File.Exists(imgBurnExe))
             throw new FileNotFoundException("ImgBurn.exe not found.", imgBurnExe);
 
         Directory.CreateDirectory(Path.GetDirectoryName(outIso) ?? ".");
-
-        if (File.Exists(outIso))
-            File.Delete(outIso);
-
-        var label = SanitizeLabelForImgBurn(discLabel);
+        if (File.Exists(outIso)) File.Delete(outIso);
 
         var args =
             "/MODE BUILD " +
@@ -353,38 +336,13 @@ public sealed class ConvertPipeline
             "/BUILDOUTPUTMODE IMAGEFILE " +
             "/FILESYSTEM \"ISO9660 + UDF\" " +
             "/UDFREVISION 1.02 " +
-            "/VOLUMELABEL \"" + label + "\" " +
+            "/VOLUMELABEL \"" + discLabel + "\" " +
             "/SRC \"" + dvdRoot + "\" " +
             "/DEST \"" + outIso + "\" " +
             "/START " +
             "/CLOSE";
 
-        Report(progress, 90, "ISO", "Starting ImgBurn");
-        await ExecAsync(imgBurnExe, args, Path.GetDirectoryName(imgBurnExe) ?? Environment.CurrentDirectory, progress, "ImgBurn", ct).ConfigureAwait(false);
-        Report(progress, 98, "ISO", "ImgBurn finished");
-    }
-
-    private static string SanitizeLabelForImgBurn(string label)
-    {
-        var s = (label ?? "AVITODVD").Trim();
-        if (s.Length == 0) s = "AVITODVD";
-        if (s.Length > 32) s = s.Substring(0, 32);
-
-        var sb = new StringBuilder();
-        foreach (var ch in s)
-        {
-            if ((ch >= 'A' && ch <= 'Z') ||
-                (ch >= 'a' && ch <= 'z') ||
-                (ch >= '0' && ch <= '9') ||
-                ch == '_' || ch == '-')
-            {
-                sb.Append(ch);
-            }
-        }
-
-        var clean = sb.ToString().ToUpperInvariant();
-        if (clean.Length == 0) clean = "AVITODVD";
-        return clean;
+        await ExecAsync(imgBurnExe, args, Path.GetDirectoryName(imgBurnExe) ?? Environment.CurrentDirectory, "ImgBurn", ct).ConfigureAwait(false);
     }
 
     private static string? ResolveImgBurnPath(string toolsDir)
@@ -416,5 +374,55 @@ public sealed class ConvertPipeline
             var dest = Path.Combine(destDir, Path.GetFileName(dir));
             CopyDirectory(dir, dest);
         }
+    }
+
+    private static string SanitizeDiscLabel(string label)
+    {
+        var s = (label ?? "AVITODVD").Trim();
+        if (s.Length == 0) s = "AVITODVD";
+        if (s.Length > 32) s = s.Substring(0, 32);
+
+        var sb = new StringBuilder();
+        foreach (var ch in s)
+        {
+            if ((ch >= 'A' && ch <= 'Z') ||
+                (ch >= 'a' && ch <= 'z') ||
+                (ch >= '0' && ch <= '9') ||
+                ch == '_' || ch == '-')
+                sb.Append(ch);
+        }
+
+        var clean = sb.ToString().ToUpperInvariant();
+        if (clean.Length == 0) clean = "AVITODVD";
+        return clean;
+    }
+}
+
+public sealed class ConvertJobRequest
+{
+    public List<SourceItem> Sources { get; set; } = new();
+    public DvdSettings Dvd { get; set; } = new();
+    public OutputSettings Output { get; set; } = new();
+
+    public string WorkingDir { get; set; } = "";
+    public string ToolsDir { get; set; } = "";
+
+    public PresetDefinition? Preset { get; set; }
+}
+
+public sealed class ConvertProgress
+{
+    public int Percent { get; set; }
+    public string Stage { get; set; } = "";
+    public string Message { get; set; } = "";
+}
+
+public sealed class LogBuffer
+{
+    public event Action<string>? LineAdded;
+
+    public void AddLine(string line)
+    {
+        LineAdded?.Invoke(line);
     }
 }
