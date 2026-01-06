@@ -97,10 +97,10 @@ namespace AVItoDVDISO.App
             {
                 var toolsDir = Path.Combine(AppContext.BaseDirectory, "tools");
                 var needDvdauthor = VM.ExportFolder;
-                var needXorriso = VM.ExportIso;
+                var needIsoTool = VM.ExportIso;
 
                 var mgr = new ToolManager();
-                if (!mgr.HasAllRequiredTools(toolsDir, needDvdauthor, needXorriso))
+                if (!mgr.HasAllRequiredTools(toolsDir, needDvdauthor, needIsoTool))
                 {
                     var msg =
                         "Required tools are missing and will be downloaded to the tools folder.\n\n" +
@@ -115,7 +115,7 @@ namespace AVItoDVDISO.App
                     var status = await mgr.EnsureToolsAsync(
                         toolsDir,
                         needDvdauthor,
-                        needXorriso,
+                        needIsoTool,
                         line => Dispatcher.Invoke(() => VM.LogText += line + Environment.NewLine),
                         CancellationToken.None);
 
@@ -138,4 +138,5 @@ namespace AVItoDVDISO.App
         }
     }
 }
+
 
