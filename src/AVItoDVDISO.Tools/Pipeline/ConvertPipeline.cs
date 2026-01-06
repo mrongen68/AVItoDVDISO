@@ -251,7 +251,7 @@ private string BuildDvdauthorXml(List<string> mpgFiles)
             CreateNoWindow = true
         };
 
-        using var p = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start process: " + exe);
+        using var p = System.Diagnostics.Process.Start(psi) ?? throw new InvalidOperationException("Failed to start process: " + exe);
 
         var stdoutTask = p.StandardOutput.ReadToEndAsync();
         var stderrTask = p.StandardError.ReadToEndAsync();
@@ -287,3 +287,4 @@ private string BuildDvdauthorXml(List<string> mpgFiles)
         }
     }
 }
+
